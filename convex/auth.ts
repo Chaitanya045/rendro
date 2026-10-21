@@ -16,6 +16,9 @@ import { authCookiePrefix } from "../shared/auth-cookies";
 import { sendAuthLinkEmail, sendExistingAccountNotice } from "./authEmails";
 import authSchema from "./betterAuth/schema";
 import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
+import {
+  EMAIL_SIGN_IN_PATHS, emailSignInEnabled, githubHandOff, githubSignInConfig, githubUserInfo, handOffCapture, withoutOAuthTokens,
+} from "./githubAuth";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,
@@ -37,6 +40,9 @@ function assertRuntimeEnvironment(): void {
 
 export function createAuthOptions(ctx: GenericCtx<DataModel>) {
   const siteUrl = process.env.SITE_URL ?? "http://localhost:3000";
+  const github = githubSignInConfig();
+  // What this request's GitHub sign-in, link or unlink hands the control Worker (convex/githubAuth.ts).
+  const capture = handOffCapture();
   return {
     appName: "rendro",
     // Better Auth diagnostics can include callback URLs and raw exceptions.
@@ -45,7 +51,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     baseURL: siteUrl,
     secret: optionEnv("AUTH_SECRET"),
     trustedOrigins: [siteUrl],
-    database: (options: BetterAuthOptions) => boundSessionLifetime(authComponent.adapter(ctx)(options)),
+    database: (options: BetterAuthOptions) => boundSessionLifetime(withoutOAuthTokens(authComponent.adapter(ctx)(options), capture)),
+    // `AUTH_EMAIL_SIGN_IN=off` (with GitHub configured): sign-in is GitHub-only.
+    disabledPaths: emailSignInEnabled(github) ? [] : EMAIL_SIGN_IN_PATHS,
     advanced: {
       // HTTPS: host-only `__Host-better-auth.*` cookies (Secure, Path=/, no
       // Domain). Better Auth only knows `__Secure-`, so its automatic prefix is
@@ -86,9 +94,22 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       sendVerificationEmail: ({ user, url }) =>
         sendAuthLinkEmail("verification", user, url),
     },
+    // The GitHub App's user-to-server OAuth (#338), only when its client is configured.
+    socialProviders: github ? {
+      github: {
+        clientId: github.clientId,
+        clientSecret: github.clientSecret,
+        // GitHub App permissions come from the App, not from OAuth scopes.
+        disableDefaultScope: true,
+        getUserInfo: githubUserInfo(capture),
+      },
+    } : {},
     account: {
       accountLinking: {
         enabled: true,
+        // GitHub links to an account with the same address, but only one whose address was verified here,
+        // and only with an address GitHub verified (githubUserInfo).
+        trustedProviders: ["github"],
         requireLocalEmailVerified: true,
         allowDifferentEmails: false,
         allowUnlinkingAll: false,
@@ -110,6 +131,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         // after inactivity and would exhaust a busy shared IP indefinitely.
         "/get-session": false,
         "/sign-in/email": { window: 60, max: 5 },
+        "/sign-in/social": { window: 60, max: 10 },
         "/sign-up/email": { window: 60 * 60, max: 5 },
         "/request-password-reset": { window: 60 * 60, max: 5 },
         "/send-verification-email": { window: 60 * 60, max: 5 },
@@ -121,6 +143,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
       }),
       sessionLifetime(),
+      githubHandOff(capture, process.env.CONVEX_INTERNAL_SECRET),
       convex({ authConfig }),
     ],
   } satisfies BetterAuthOptions;

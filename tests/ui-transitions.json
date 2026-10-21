@@ -375,6 +375,23 @@
               "kind": "unit"
             }
           ]
+        },
+        {
+          "id": "UI-001-E08",
+          "from": "Anonymous landing request, GitHub sign-in configured",
+          "trigger": "Load / and follow a call to action",
+          "expected": "Every call to action reads Sign in with GitHub and opens the sign-in page with the GitHub button; the coming-soon copy is gone",
+          "inventoryRefs": [
+            "A01"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "turns every landing call to action into Sign in with GitHub, which opens the sign-in page with the GitHub button",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -12230,6 +12247,384 @@
             {
               "file": "e2e/shell-entry.spec.ts",
               "name": "explains how to open a repository, links to account security and signs out at 375",
+              "kind": "e2e"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-167",
+      "title": "GitHub sign-in, account linking and the email switch (#338)",
+      "area": "Pages and entry",
+      "routes": [
+        "GET /sign-in",
+        "GET /sign-up"
+      ],
+      "sources": [
+        "src/routes/auth-pages.ts",
+        "src/auth-proxy.ts",
+        "src/github-hand-off.ts",
+        "src/routes/landing.ts"
+      ],
+      "roles": [
+        "anonymous",
+        "owner",
+        "member",
+        "outsider"
+      ],
+      "viewports": [
+        375,
+        1440
+      ],
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "status": "e2e",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New with #338: Better Auth's GitHub provider against the fake GitHub; the browser runs the page controller, the unit suite the real Better Auth, Worker proxy and session middleware.",
+      "edges": [
+        {
+          "id": "UI-167-E01",
+          "from": "Sign-in page, GitHub configured",
+          "trigger": "Activate Sign in with GitHub",
+          "expected": "The button is busy and disabled, a second submit sends nothing, and the browser follows GitHub's authorize URL with the safe return destination as the callback",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "starts GitHub sign-in with the return destination, shows it is busy, then follows GitHub's authorize URL",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "keeps GitHub sign-in inside this origin whatever return target is requested",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "asks GitHub for a code with a state and an S256 PKCE challenge, and signs a new reader in",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E02",
+          "from": "GitHub sign-in starting",
+          "trigger": "The start request fails or answers without an authorize URL",
+          "expected": "Fixed copy beside the button, never the upstream text; the button is enabled again and a retry proceeds",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "explains a failure to start with fixed copy, never the upstream text, and lets the reader try again",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E03",
+          "from": "GitHub sign-in busy, page left for GitHub",
+          "trigger": "The browser restores the page from its back-forward cache",
+          "expected": "The button is enabled again",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "re-enables the button when the browser restores the page from its back-forward cache",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E04",
+          "from": "GitHub authorize page",
+          "trigger": "The reader approves",
+          "expected": "Signed in at the return destination; the identity and tokens are handed to the control Worker and no token is stored in Convex",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "asks GitHub for a code with a state and an S256 PKCE challenge, and signs a new reader in",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "hands the GitHub identity and refreshable tokens to the control Worker, and never stores a token in Convex",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "hands the fresh tokens over again on every sign-in, still storing none",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/github-sign-in.spec.ts",
+              "name": "a reader signs in with GitHub, opens a private repository's docs and comments on them",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E05",
+          "from": "GitHub authorize page",
+          "trigger": "The reader cancels",
+          "expected": "Back on the sign-in page with the canceled copy, signed out, nothing handed over",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "returns a denial to the sign-in page with fixed copy, signed out and with nothing handed over",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/github-sign-in.spec.ts",
+              "name": "a reader who cancels on GitHub returns to the sign-in page, signed out",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E06",
+          "from": "GitHub callback",
+          "trigger": "The state is missing, forged or replayed",
+          "expected": "Back on the sign-in page with the expired-attempt copy, signed out",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "refuses a callback whose state does not belong to this browser",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "refuses a tampered state and a replayed callback",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E07",
+          "from": "GitHub callback",
+          "trigger": "The GitHub account has no verified address",
+          "expected": "Back on the sign-in page with the verify-on-GitHub copy",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "refuses a GitHub account without a verified address, and ignores unverified ones",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "shows a GitHub failure beside the GitHub button while the email form stays usable",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E08",
+          "from": "GitHub callback for an address that already has an account",
+          "trigger": "Sign in with GitHub",
+          "expected": "Linked when the address was verified here; refused with the couldn't-connect copy when it was not",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "links GitHub to an account whose address was verified here",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "does not link GitHub to an account whose address was never verified here",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E09",
+          "from": "Signed in by email",
+          "trigger": "Link GitHub (link-social)",
+          "expected": "Linked for the same address; refused for another address or a GitHub account another reader holds",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "links GitHub from a signed-in account with the same address, and refuses one with another address",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "refuses to link a GitHub account that already belongs to another reader",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E10",
+          "from": "GitHub callback",
+          "trigger": "The control Worker cannot take the hand-off",
+          "expected": "Still signed in, without GitHub access; the next sign-in links again",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "keeps the reader signed in, without GitHub access, when the control Worker cannot take the hand-off",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "strips the hand-off and forwards nothing without the control Worker's binding",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E11",
+          "from": "Signed in with GitHub",
+          "trigger": "Unlink GitHub",
+          "expected": "The control Worker forgets the tokens first; a failure answers 503 and unlinks nothing; the last method is never unlinked",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "drops the tokens in the control Worker before Convex unlinks the account",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "unlinks nothing when the control Worker cannot drop the tokens",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "never unlinks the last sign-in method",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E12",
+          "from": "Sign-in or sign-up page, AUTH_EMAIL_SIGN_IN=off",
+          "trigger": "Load the page or try email sign-in",
+          "expected": "GitHub alone, first in tab order, with its errors beside it; email sign-in and sign-up answer 404 and /sign-up redirects to /sign-in",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "offers GitHub alone when email sign-in is off, with its error beside it and the button first in tab order",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "makes sign-in GitHub-only when AUTH_EMAIL_SIGN_IN=off",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "ignores AUTH_EMAIL_SIGN_IN=off while GitHub is not configured",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-sign-in.test.ts",
+              "name": "leaves email sign-in on by default, beside GitHub",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E13",
+          "from": "Sign-up page, GitHub configured",
+          "trigger": "Activate Sign up with GitHub",
+          "expected": "The same GitHub flow, returning to the sign-up destination",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/github-sign-in-browser.test.ts",
+              "name": "signs up with GitHub from the sign-up page",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-167-E14",
+          "from": "Sign-in page, GitHub configured",
+          "trigger": "Load the page, or return to it after a GitHub failure, in either theme",
+          "expected": "The GitHub button above the email form, its failure copy beside it, pixel-identical to the baselines and free of axe violations in light and dark",
+          "inventoryRefs": [
+            "UI-167"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — default",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — oauth-access-denied",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — default — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — default — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-access-denied — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-access-denied — 1440 — dark",
               "kind": "e2e"
             }
           ]

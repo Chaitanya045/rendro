@@ -15,6 +15,10 @@ const allowedClockReads: Record<string, string> = {
     "Better Auth before-hook for HTTP /get-session reads, run only by auth.handler/auth.api in httpActions "
     + "(it calls ctx.runMutation, which a query cannot). Queries reach it only because createAuthOptions() builds the plugin list "
     + "for auth.$context/adapter lookups. It reads the clock solely to pick a rate-limit bucket, never to grant access.",
+  "shared/github-hand-off.ts#sealHandOff":
+    "Called only from the GitHub hand-off plugin's onResponse (#338), which Better Auth's router runs for HTTP responses in httpActions, "
+    + "never in a query. Queries reach it only because createAuthOptions() builds the plugin list for adapter lookups. It reads the clock "
+    + "solely to stamp the sealed hand-off's one-minute expiry, which the serving Worker checks; it never grants access in Convex.",
 };
 
 function loadSources() {

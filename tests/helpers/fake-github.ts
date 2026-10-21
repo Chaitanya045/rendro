@@ -25,11 +25,27 @@ interface TreeItem {
 }
 
 export type Endpoint = "ref" | "tree" | "blob" | "tarball" | "archive" | "deliveries" | "redeliver"
-  | "user-installations" | "installation-repositories" | "installation" | "repository" | "permission" | "oauth" | "other";
+  | "user-installations" | "installation-repositories" | "installation" | "repository" | "permission" | "oauth" | "user" | "other";
 
 export interface FakeUser {
   id: number;
   login: string;
+}
+
+/** An address on a GitHub account, as `GET /user/emails` lists it. */
+export interface FakeEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+}
+
+/** A pending authorization code of the OAuth web flow (#338). */
+interface FakeAuthorizationCode {
+  user: number;
+  redirectUri: string;
+  /** PKCE S256 challenge, when the request carried one. */
+  challenge: string | null;
+  expiresAt: number;
 }
 
 export interface FakeInstallation {
@@ -176,12 +192,49 @@ export class FakeGitHub {
   private readonly accessTokens = new Map<string, { user: number; expiresAt: number | null }>();
   private readonly refreshTokens = new Map<string, { user: number; expiresAt: number }>();
   private readonly installationTokens = new Map<string, number>();
+  /** User ID → the addresses `GET /user/emails` lists (#338). */
+  readonly emails = new Map<number, FakeEmail[]>();
+  private readonly authorizationCodes = new Map<string, FakeAuthorizationCode>();
 
-  user(login: string, id = 5000 + this.users.size + 1): FakeUser {
+  user(login: string, id = 5000 + this.users.size + 1, emails: FakeEmail[] = []): FakeUser {
     const user = { id, login };
     this.users.set(id, user);
+    this.emails.set(id, emails);
     return user;
   }
+
+  /**
+   * The OAuth web flow's authorize step (#338), as GitHub answers it after the user decided:
+   * the `redirect_uri` with a one-time code (or `error=access_denied`) and the caller's `state`.
+   * A code is bound to the user, the redirect URI and the PKCE challenge, and lives ten minutes.
+   */
+  authorize(params: URLSearchParams, user: FakeUser, decision: "approve" | "deny" = "approve"): string {
+    const redirectUri = params.get("redirect_uri");
+    if (params.get("client_id") !== this.clientId || !redirectUri) throw new Error("Unknown OAuth client or missing redirect_uri");
+    const target = new URL(redirectUri);
+    const state = params.get("state");
+    if (state !== null) target.searchParams.set("state", state);
+    if (decision === "deny") {
+      target.searchParams.set("error", "access_denied");
+      target.searchParams.set("error_description", "The user has denied your application access.");
+      return target.href;
+    }
+    const code = randomBytes(10).toString("hex");
+    const challenge = params.get("code_challenge_method") === "S256" ? params.get("code_challenge") : null;
+    this.authorizationCodes.set(code, { user: user.id, redirectUri, challenge, expiresAt: this.now() + 10 * 60 * 1000 });
+    target.searchParams.set("code", code);
+    return target.href;
+  }
+
+  /** `fetch` addressed to the real hosts (github.com, api.github.com), answered by this fake: what Better Auth's GitHub provider calls. */
+  publicFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    const origin = url.hostname === "github.com" ? this.webOrigin : url.hostname === "api.github.com" ? this.origin : null;
+    if (!origin) return new Response("unknown origin", { status: 502 });
+    const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
+    return this.fetch(`${origin}${url.pathname}${url.search}`, { method: request.method, headers: request.headers, body, redirect: "manual" });
+  };
 
   install(account: string, options: { id?: number; repositories?: "all" | number[]; suspended?: boolean } = {}): FakeInstallation {
     const repositories = options.repositories ?? "all";
@@ -372,7 +425,7 @@ export class FakeGitHub {
     if (url.origin === this.archiveOrigin) return this.archive(url);
     if (url.origin !== this.origin) return new Response("unknown origin", { status: 502 });
     if (url.pathname.startsWith("/app/")) return this.app(request, url);
-    if (url.pathname.startsWith("/user/")) return this.userApi(request, url);
+    if (url.pathname === "/user" || url.pathname.startsWith("/user/")) return this.userApi(request, url);
     const authorization = request.headers.get("authorization");
     const scope = this.installationScope(authorization);
     if (scope === "invalid") return this.json({ message: "Bad credentials" }, 401);
@@ -470,6 +523,8 @@ export class FakeGitHub {
     const user = grant && (grant.expiresAt === null || grant.expiresAt > this.now()) ? this.users.get(grant.user) : undefined;
     if (!user) return this.json({ message: "Bad credentials" }, 401);
     if (this.rate.remaining <= 0) return this.withRate(this.json({ message: "API rate limit exceeded for user." }, 403));
+    if (url.pathname === "/user") return this.billed(this.json({ id: user.id, login: user.login, name: null, email: null, avatar_url: `https://avatars.github.test/u/${user.id}` }));
+    if (url.pathname === "/user/emails") return this.billed(this.json(this.emails.get(user.id) ?? []));
     const perPage = Number(url.searchParams.get("per_page") ?? 30);
     const page = Number(url.searchParams.get("page") ?? 1);
     const reachable = (installation: FakeInstallation) => installation.account.toLowerCase() === user.login.toLowerCase()
@@ -497,15 +552,46 @@ export class FakeGitHub {
     return listed("repositories", repos.map((repo) => ({ ...this.repoJson(repo), permissions: { admin: false, maintain: false, push: false, triage: false, pull: true } })), { repository_selection: installation.repositories === "all" ? "all" : "selected" });
   }
 
-  /** POST /login/oauth/access_token with grant_type=refresh_token. GitHub answers errors with 200 and an `error` code. */
+  /** The user `GET /login/oauth/authorize` signs in as, and what they decide; `?as=<login>` (a fake-only parameter) picks another. */
+  authorizeAs: FakeUser | null = null;
+  authorizeDecision: "approve" | "deny" = "approve";
+
+  /**
+   * POST /login/oauth/access_token with grant_type=authorization_code (#338) or refresh_token, and the
+   * browser's GET /login/oauth/authorize. GitHub answers token errors with 200 and an `error` code.
+   */
   private async oauth(request: Request, url: URL): Promise<Response> {
+    if (request.method === "GET" && url.pathname === "/login/oauth/authorize") {
+      const login = url.searchParams.get("as");
+      const user = login ? [...this.users.values()].find((candidate) => candidate.login === login) : this.authorizeAs;
+      if (!user) return new Response("No signed-in GitHub user", { status: 400 });
+      return new Response(null, { status: 302, headers: { location: this.authorize(url.searchParams, user, this.authorizeDecision) } });
+    }
     if (request.method !== "POST" || url.pathname !== "/login/oauth/access_token") return new Response("Not found", { status: 404 });
     const form = new URLSearchParams(await request.text());
     if (form.get("client_id") !== this.clientId || form.get("client_secret") !== this.clientSecret) return this.json({ error: "incorrect_client_credentials" });
+    if (form.get("grant_type") === "authorization_code") return this.exchangeCode(form);
     const grant = this.refreshTokens.get(form.get("refresh_token") ?? "");
     if (form.get("grant_type") !== "refresh_token" || !grant || grant.expiresAt <= this.now()) return this.json({ error: "bad_refresh_token" });
     // Refresh tokens rotate: the one just used stops working.
     this.refreshTokens.delete(form.get("refresh_token") as string);
+    const tokens = this.signIn(this.users.get(grant.user) as FakeUser);
+    return this.json({
+      access_token: tokens.accessToken, expires_in: tokens.accessTokenExpiresAt === null ? undefined : Math.round((tokens.accessTokenExpiresAt - this.now()) / 1000),
+      refresh_token: tokens.refreshToken, refresh_token_expires_in: Math.round(this.refreshTokenLifetime / 1000), token_type: "bearer", scope: "",
+    });
+  }
+
+  /** A code is used once, by the redirect URI it was issued for, with the PKCE verifier of its challenge. */
+  private exchangeCode(form: URLSearchParams): Response {
+    const code = form.get("code") ?? "";
+    const grant = this.authorizationCodes.get(code);
+    this.authorizationCodes.delete(code);
+    const verifier = form.get("code_verifier");
+    const challenge = verifier === null ? null : createHash("sha256").update(verifier).digest("base64url");
+    if (!grant || grant.expiresAt <= this.now() || grant.redirectUri !== form.get("redirect_uri") || grant.challenge !== challenge) {
+      return this.json({ error: "bad_verification_code", error_description: "The code passed is incorrect or expired." });
+    }
     const tokens = this.signIn(this.users.get(grant.user) as FakeUser);
     return this.json({
       access_token: tokens.accessToken, expires_in: tokens.accessTokenExpiresAt === null ? undefined : Math.round((tokens.accessTokenExpiresAt - this.now()) / 1000),
@@ -575,6 +661,7 @@ function classify(url: URL): Endpoint {
   if (url.hostname === "github.test") return "oauth";
   if (/^\/user\/installations\/\d+\/repositories$/.test(url.pathname)) return "installation-repositories";
   if (url.pathname === "/user/installations") return "user-installations";
+  if (url.pathname === "/user" || url.pathname === "/user/emails") return "user";
   if (url.pathname === "/installation/repositories") return "installation";
   if (/^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) return "repository";
   if (/^\/repos\/[^/]+\/[^/]+\/collaborators\/[^/]+\/permission$/.test(url.pathname)) return "permission";

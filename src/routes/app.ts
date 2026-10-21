@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
+import { signInMethods } from "@/config";
 import { renderLandingPage } from "@/routes/landing";
 import { menuSurfaceStyles } from "../ui/menu-styles";
 
@@ -9,7 +10,7 @@ const app = new Hono<{ Variables: { user?: User } }>();
 app.get("/", (c) => {
   const user = c.get("user");
   if (!user) {
-    return c.html(renderLandingPage());
+    return c.html(renderLandingPage({ github: signInMethods().github }));
   }
 
   return c.redirect("/home");

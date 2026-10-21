@@ -1,4 +1,5 @@
 import type { User } from "better-auth/types";
+import type { SignInMethods } from "@/config";
 import { authRefreshStyles, authRuntime, authStyles, safeReturnTo, signInErrorMessage, type AuthPage } from "./auth-pages";
 import { CommentRecovery, FaviconLinks, FontHead, ThemeAssets, ThemeButton } from "./head";
 import { InlineScript, InlineStyle, renderHtml, scriptJson } from "./trusted-html";
@@ -10,6 +11,30 @@ interface AuthPageOptions {
   verified?: boolean;
   error?: string;
   linkInvalid?: boolean;
+  /** Sign-in and sign-up (#338): which methods to offer; email alone by default. */
+  methods?: SignInMethods;
+}
+
+const EMAIL_ONLY: SignInMethods = { github: false, email: true };
+
+// GitHub's mark (Octicons `mark-github`, MIT).
+const GITHUB_MARK = "M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z";
+
+/** GitHub sign-in (#338): the runtime asks Better Auth for GitHub's authorize URL and follows it. */
+function GitHubSignIn({ label, primary, error }: { label: string; primary: boolean; error: string }) {
+  return (
+    <form id="github-form" class="github-form" novalidate>
+      <button class={`button ${primary ? "primary" : "secondary"} github-button`} type="submit">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d={GITHUB_MARK} /></svg>
+        <span class="button-label">{label}</span><span class="spinner" aria-hidden="true"></span>
+      </button>
+      <p class="message error" id="github-error" role="alert">{error}</p>
+    </form>
+  );
+}
+
+function MethodDivider() {
+  return <p class="method-divider"><span>or</span></p>;
 }
 
 function Field({ id, label, type, autocomplete, minlength }: {
@@ -55,19 +80,25 @@ function AccountFooter({ href, label }: { href: string; label: string }) {
   return <div class="account-footer"><a href={href}>{label}</a><form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form></div>;
 }
 
-function PageBody({ page, user, verified = false, token = "", error = "", linkInvalid = false }: AuthPageOptions & { page: AuthPage }) {
+function PageBody({ page, user, verified = false, token = "", error = "", linkInvalid = false, methods = EMAIL_ONLY }: AuthPageOptions & { page: AuthPage }) {
   if (page === "sign-in") {
+    // An OAuth failure (?error=) is GitHub's, so it shows beside the GitHub button once there is one.
+    const message = error ? signInErrorMessage(error, methods.email) : "";
     return (
       <>
         <div class="heading"><p class="eyebrow">Welcome back</p><h1>Sign in to Rendro</h1><p>Open your team documentation and continue where you left off.</p></div>
-        <form id="auth-form" novalidate>
-          <Field id="email" label="Work email" type="email" autocomplete="email" />
-          <Field id="password" label="Password" type="password" autocomplete="current-password" />
-          <div class="form-row"><label class="check"><input id="rememberMe" type="checkbox" checked /> Keep me signed in</label><a data-return-link="" href="/forgot-password">Forgot password?</a></div>
-          <p class="message error" id="form-error" role="alert">{error ? signInErrorMessage(error) : ""}</p>
-          <SubmitButton label="Sign in" />
-        </form>
-        <p class="switch">New to Rendro? <a data-return-link="" href="/sign-up">Create an account</a></p>
+        {methods.github && <GitHubSignIn label="Sign in with GitHub" primary={!methods.email} error={message} />}
+        {methods.github && methods.email && <MethodDivider />}
+        {methods.email && (
+          <form id="auth-form" novalidate>
+            <Field id="email" label="Work email" type="email" autocomplete="email" />
+            <Field id="password" label="Password" type="password" autocomplete="current-password" />
+            <div class="form-row"><label class="check"><input id="rememberMe" type="checkbox" checked /> Keep me signed in</label><a data-return-link="" href="/forgot-password">Forgot password?</a></div>
+            <p class="message error" id="form-error" role="alert">{methods.github ? "" : message}</p>
+            <SubmitButton label="Sign in" />
+          </form>
+        )}
+        {methods.email && <p class="switch">New to Rendro? <a data-return-link="" href="/sign-up">Create an account</a></p>}
       </>
     );
   }
@@ -75,6 +106,7 @@ function PageBody({ page, user, verified = false, token = "", error = "", linkIn
     return (
       <>
         <div class="heading"><p class="eyebrow">Create your account</p><h1>Start shipping docs</h1><p>Use your verified work email to create your account.</p></div>
+        {methods.github && <><GitHubSignIn label="Sign up with GitHub" primary={false} error="" /><MethodDivider /></>}
         <form id="auth-form" novalidate>
           <Field id="name" label="Full name" type="text" autocomplete="name" />
           <Field id="email" label="Work email" type="email" autocomplete="email" />

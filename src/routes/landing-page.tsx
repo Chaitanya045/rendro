@@ -2,7 +2,12 @@ import { FaviconLinks, FontHead, ThemeAssets, ThemeButton } from "./head";
 import { landingScript, landingStyles } from "./landing";
 import { InlineScript, InlineStyle, renderHtml } from "./trusted-html";
 
-export function LandingPage() {
+/**
+ * With GitHub sign-in configured (#338), every call to action reads "Sign in with GitHub" and opens the
+ * sign-in page, which starts it; until then they open email sign-up.
+ */
+export function LandingPage({ github = false }: { github?: boolean }) {
+  const cta = github ? { href: "/sign-in", label: "Sign in with GitHub" } : { href: "/sign-up", label: "Get started" };
   return (
     <html lang="en">
       <head>
@@ -34,8 +39,8 @@ export function LandingPage() {
             </nav>
             <div class="header-actions">
               <ThemeButton />
-              <a class="button button-quiet header-signin" href="/sign-in">Sign in</a>
-              <a class="button button-primary header-get-started" href="/sign-up">Get started</a>
+              {!github && <a class="button button-quiet header-signin" href="/sign-in">Sign in</a>}
+              <a class="button button-primary header-get-started" href={cta.href}>{cta.label}</a>
             </div>
           </div>
         </header>
@@ -47,7 +52,7 @@ export function LandingPage() {
                 <h1 id="hero-title">Docs straight from your GitHub repository.</h1>
                 <p class="hero-lede">Pick a repository and Rendro finds its docs, renders its Markdown and HTML from the repository, and serves them as a navigable workspace with inline comments, for everyone who can read the repository.</p>
                 <div class="hero-actions">
-                  <a class="button button-primary" href="/sign-up" data-action-id="hero-start">Get started</a>
+                  <a class="button button-primary" href={cta.href} data-action-id="hero-start">{cta.label}</a>
                   <a class="button button-secondary" href="#product" data-scroll-section="product" data-action-id="explore-product">Explore the workspace <span class="arrow" aria-hidden="true">→</span></a>
                 </div>
                 <ul class="hero-facts" aria-label="Product principles">
@@ -84,7 +89,7 @@ export function LandingPage() {
               </header>
               <div class="workflow-grid">
                 <div class="workflow-steps" data-reveal-group="" data-reveal-stagger="55">
-                  <article class="workflow-step" data-reveal-item="" style="--reveal-y:12px"><span class="step-number">01</span><div><h3>Sign in with GitHub</h3><p>Choose which repositories the Rendro GitHub App may read. GitHub sign-in is coming soon; until then, create an account with your email.</p></div></article>
+                  <article class="workflow-step" data-reveal-item="" style="--reveal-y:12px"><span class="step-number">01</span><div><h3>Sign in with GitHub</h3><p>Choose which repositories the Rendro GitHub App may read.{github ? "" : " GitHub sign-in is coming soon; until then, create an account with your email."}</p></div></article>
                   <article class="workflow-step" data-reveal-item="" style="--reveal-y:12px"><span class="step-number">02</span><div><h3>Pick a repository</h3><p>Rendro detects where its docs live and renders the Markdown and HTML pages from the repository.</p></div></article>
                   <article class="workflow-step" data-reveal-item="" style="--reveal-y:12px"><span class="step-number">03</span><div><h3>Read and comment</h3><p>Your team reads with a file tree and search, and comments on any page. Push to the branch and Rendro renders the new commit.</p></div></article>
                 </div>
@@ -129,7 +134,7 @@ export function LandingPage() {
                 <p class="section-kicker">Security</p>
                 <h2 id="security-title">Private stays private. Access follows GitHub.</h2>
                 <p class="section-intro">Rendro keeps no permission model of its own. The people who can read a repository on GitHub can read its docs and comments, and nobody else.</p>
-                <a class="button button-secondary" href="/sign-up" data-action-id="security-start">Get started</a>
+                <a class="button button-secondary" href={cta.href} data-action-id="security-start">{cta.label}</a>
               </div>
               <dl class="security-list" data-reveal-group="" data-reveal-stagger="45">
                 <div class="security-row" data-reveal-item="" style="--reveal-y:12px"><dt>Access</dt><dd>Every view is checked against the repository's GitHub permissions, which Rendro mirrors. When GitHub removes someone's access, their access to the docs and comments ends too.</dd></div>
@@ -144,7 +149,7 @@ export function LandingPage() {
             <div class="container">
               <div class="cta-panel" data-reveal="" style="--reveal-y:12px">
                 <div><h2 id="cta-title">Your docs are already in the repository.</h2><p>Let Rendro render them, keep them current with every push, and bring the discussion onto the page.</p></div>
-                <a class="button button-primary" href="/sign-up" data-action-id="final-start">Get started</a>
+                <a class="button button-primary" href={cta.href} data-action-id="final-start">{cta.label}</a>
               </div>
             </div>
           </section>
@@ -164,6 +169,6 @@ export function LandingPage() {
   );
 }
 
-export function renderLandingPage(): string {
-  return renderHtml(<LandingPage />, "<!DOCTYPE html>\n");
+export function renderLandingPage(options: { github?: boolean } = {}): string {
+  return renderHtml(<LandingPage github={options.github} />, "<!DOCTYPE html>\n");
 }

@@ -406,7 +406,8 @@ async function openAuth(page: Page, visual: VisualState, family: string, state: 
     const code = oauthCodes[state];
     if (code) {
       await page.goto(`/sign-in?error=${code}`);
-      await expect(formError).not.toBeEmpty();
+      // GitHub sign-in is configured in the harness (#338): a callback's failure shows beside the GitHub button.
+      await expect(page.locator("#github-error")).not.toBeEmpty();
       return rendered();
     }
     if (state === "invalid-credentials" || state === "rate-limited") {

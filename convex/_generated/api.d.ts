@@ -14,6 +14,7 @@ import type * as authEmails from "../authEmails.js";
 import type * as authHttp from "../authHttp.js";
 import type * as commentOperations from "../commentOperations.js";
 import type * as crons from "../crons.js";
+import type * as githubAuth from "../githubAuth.js";
 import type * as http from "../http.js";
 import type * as httpErrors from "../httpErrors.js";
 import type * as publicErrors from "../publicErrors.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   authHttp: typeof authHttp;
   commentOperations: typeof commentOperations;
   crons: typeof crons;
+  githubAuth: typeof githubAuth;
   http: typeof http;
   httpErrors: typeof httpErrors;
   publicErrors: typeof publicErrors;

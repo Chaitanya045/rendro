@@ -8,6 +8,10 @@ import { backendFetch } from "@/backend-fetch";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { cookieSite } from "@/viewer-ticket";
 import { AUTH_COOKIE_NAMES } from "../shared/auth-cookies";
+import { GITHUB_HAND_OFF_HEADER } from "../shared/github-hand-off";
+import { linkGitHubAccount, unlinkGitHubAccount } from "@/github-hand-off";
+import { sessionViewer } from "@/middleware/session";
+import type { Fetcher } from "@/repo-read/access";
 
 const SESSION_REVOCATION_PATHS = new Set([
   "/api/auth/revoke-session", "/api/auth/revoke-sessions", "/api/auth/revoke-other-sessions",
@@ -74,8 +78,16 @@ async function proxiedHeaders(request: Request, target: string, method = request
   return headers;
 }
 
+/** What the proxy does around Convex for one request; see src/github-hand-off.ts. */
+interface ProxyHooks {
+  /** Before forwarding: a response here answers instead of Convex. */
+  before?(body: string | undefined): Promise<Response | null>;
+  /** The sealed GitHub hand-off Convex's response carried. */
+  handOff?(sealed: string): Promise<void>;
+}
+
 /** Forwards an auth request to Convex's HTTP actions, cookie-only (no bearer credentials). */
-export async function proxyConvexRequest(request: Request): Promise<Response> {
+export async function proxyConvexRequest(request: Request, hooks: ProxyHooks = {}): Promise<Response> {
   const sourceUrl = new URL(request.url);
   const target = `${CONVEX_SITE_URL}${sourceUrl.pathname}${sourceUrl.search}`;
   const requestHeaders = await proxiedHeaders(request, target);
@@ -93,10 +105,19 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
       return response;
     }
   }
+  const answered = await hooks.before?.(init.body as string | undefined);
+  if (answered) {
+    answered.headers.set("Cache-Control", "private, no-store");
+    return answered;
+  }
   const upstream = await backendFetch(target, init, "proxyConvexRequest", cookieSite(request.url));
   const setCookies = strippedSetCookies(upstream.headers);
 
   const headers = new Headers(upstream.headers);
+  // Meant for this Worker alone, never the browser, whatever the path.
+  const sealed = headers.get(GITHUB_HAND_OFF_HEADER);
+  headers.delete(GITHUB_HAND_OFF_HEADER);
+  if (sealed && hooks.handOff) await hooks.handOff(sealed);
   headers.set("Cache-Control", apiCacheControl(request, upstream));
   headers.delete("set-cookie");
   for (const cookie of setCookies) headers.append("set-cookie", cookie);
@@ -112,7 +133,32 @@ function authErrorLocation(url: URL): string {
   return `/sign-in?error=${encodeURIComponent(code)}`;
 }
 
-export async function proxyAuthRequest(request: Request): Promise<Response> {
+/**
+ * GitHub's account hand-overs (#338), where this Worker binds the control Worker: the callback's
+ * sealed hand-off is linked, and an unlink of the GitHub account first drops its tokens there.
+ */
+function githubHooks(request: Request, path: string, repoAccess: Fetcher | null): ProxyHooks {
+  if (!repoAccess) return {};
+  if (path === "/api/auth/callback/github" && request.method === "GET") {
+    return { handOff: async (sealed) => { await linkGitHubAccount(repoAccess, sealed); } };
+  }
+  if (path !== "/api/auth/unlink-account" || request.method !== "POST") return {};
+  return {
+    async before(body) {
+      let providerId: unknown;
+      // A POST always carries a body here; anything but a JSON object names no provider.
+      try { providerId = (JSON.parse(String(body)) as { providerId?: unknown } | null)?.providerId; } catch { return null; }
+      if (providerId !== "github") return null;
+      // Convex authorizes the unlink itself; this only names whose tokens to drop first.
+      const viewer = await sessionViewer(request);
+      if (viewer.kind === "anonymous") return null;
+      if (viewer.kind === "user" && await unlinkGitHubAccount(repoAccess, viewer.id)) return null;
+      return Response.json({ error: "GitHub could not be disconnected. Please try again." }, { status: 503, headers: { "Retry-After": "5" } });
+    },
+  };
+}
+
+export async function proxyAuthRequest(request: Request, repoAccess: Fetcher | null = null): Promise<Response> {
   const source = new URL(request.url);
   if (source.pathname.replace(/\/$/, "") === "/api/auth/error") {
     return new Response(null, { status: 302, headers: { Location: authErrorLocation(source) } });
@@ -128,7 +174,7 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
   await invalidateCaller();
   let upstream: Response;
   try {
-    upstream = await proxyConvexRequest(request);
+    upstream = await proxyConvexRequest(request, githubHooks(request, path, repoAccess));
     // A successful mutation can target another token or all of a user's
     // sessions. Invalidate the isolate without retaining a raw-token index.
     // Rejected anonymous requests must not flush other users' cache entries.

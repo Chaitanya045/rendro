@@ -79,6 +79,10 @@ export default async function globalSetup(config?: FullConfig) {
     const controlPath = join(directory, "wrangler.control.toml");
     await writeFile(controlPath, await controlWorkerConfig(root));
     const world = repositoryWorld({ visual: process.env.RENDRO_E2E_VISUAL === "1" });
+    // GitHub sign-in is configured (#338): the pages offer it, and Convex's calls to github.com and api.github.com
+    // terminate in the identity fixture, which answers them from the same fake GitHub the control Worker reads.
+    Object.assign(vars, { GITHUB_APP_CLIENT_ID: world.github.clientId });
+    identity.github.fetch = request => world.github.publicFetch(request);
     // The control Worker also tells the local Convex about revocations and removed repositories (#254).
     const controlVars = { GITHUB_API_ORIGIN: world.github.origin, GITHUB_WEB_ORIGIN: world.github.webOrigin, GITHUB_APP_CLIENT_ID: world.github.clientId, CONVEX_URL: convex.origin };
     const controlSecrets = {
@@ -130,7 +134,8 @@ export default async function globalSetup(config?: FullConfig) {
     if (health.status !== 200 || await health.text() !== "ok") throw new Error("Worker HTTP health check failed");
     identity.allowedOrigins.add(url.origin);
     await convex.environment({ SITE_URL: url.origin, AUTH_SECRET: authSecret, CONVEX_INTERNAL_SECRET: vars.CONVEX_INTERNAL_SECRET,
-      RESEND_API_KEY: randomBytes(32).toString("hex"), AUTH_EMAIL_FROM: "Rendro <fixture@example.test>" });
+      RESEND_API_KEY: randomBytes(32).toString("hex"), AUTH_EMAIL_FROM: "Rendro <fixture@example.test>",
+      GITHUB_APP_CLIENT_ID: world.github.clientId, GITHUB_APP_CLIENT_SECRET: world.github.clientSecret });
     await convex.push();
     const seed = await seedWorkspace({ site: convex.site, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, fetch: originalFetch });
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
