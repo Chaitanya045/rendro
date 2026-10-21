@@ -12630,6 +12630,77 @@
           ]
         }
       ]
+    },
+    {
+      "id": "UI-168",
+      "title": "The GitHub App's setup URL (#338)",
+      "area": "Pages and entry",
+      "routes": [
+        "GET /github/setup"
+      ],
+      "sources": [
+        "src/routes/github-setup.ts",
+        "src/github-hand-off.ts"
+      ],
+      "roles": [
+        "anonymous",
+        "owner",
+        "member",
+        "outsider"
+      ],
+      "viewports": [
+        375,
+        1440
+      ],
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "status": "unit",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New with #338: GitHub sends the installer here after installing the app; a redirect only, no page of its own.",
+      "edges": [
+        {
+          "id": "UI-168-E01",
+          "from": "Signed-in installer back from GitHub",
+          "trigger": "GitHub redirects to /github/setup after an install or an approval request",
+          "expected": "The mirror is listed again (whatever installation the URL names) and the reader lands on /home with the installed or requested notice",
+          "inventoryRefs": [
+            "UI-168"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-app-install.test.ts",
+              "name": "lists the installer's repositories again and returns them home, whatever installation the URL names",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-app-install.test.ts",
+              "name": "through the setup URL's refresh, even when no event arrived",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-168-E02",
+          "from": "Signed-out installer, or no control Worker",
+          "trigger": "GitHub redirects to /github/setup",
+          "expected": "Signed out: sign in first, then home; without the binding or when the refresh fails: home all the same",
+          "inventoryRefs": [
+            "UI-168"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-app-install.test.ts",
+              "name": "sends a signed-out installer to sign in first, and still returns home without the binding or when the refresh fails",
+              "kind": "unit"
+            }
+          ]
+        }
+      ]
     }
   ],
   "retired": {

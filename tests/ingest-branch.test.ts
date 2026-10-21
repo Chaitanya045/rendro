@@ -111,7 +111,10 @@ describe("ingestBranch (render-then-flip)", () => {
     const { run, repo, github, bucket } = setup();
     const head = repo.commit({ "docs/index.md": "# Home\n" });
     github.fault(/git\/blobs/, () => new Response("gone", { status: 404 }));
-    expect(await run().catch((reason: unknown) => reason)).toMatchObject({ name: "CommitIngestError", reason: "github-not-found", permanent: true, commit: head });
+    const error = await run().catch((reason: unknown) => reason);
+    expect(error).toMatchObject({ name: "CommitIngestError", reason: "github-not-found", permanent: true, commit: head });
+    // The original failure stays reachable: a bare message says nothing about where it came from.
+    expect((error as Error).cause).toMatchObject({ name: "GitHubError", kind: "not-found" });
     expect(bucket.keys("gh/v1/repo/21/ref/")).toEqual([]);
   });
 });

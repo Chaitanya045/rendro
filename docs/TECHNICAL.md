@@ -16,7 +16,7 @@ Browser
    │ session cookie, repository capability cookie
    ▼
 Serving Worker (`rendro`, src/worker.ts, Hono)
-   ├── landing, email sign-in, /home, /account/security
+   ├── landing, sign-in (email, GitHub), /home, /account/security, /github/setup
    ├── /api/auth/* proxy ───────────────► Convex: Better Auth component (users, sessions, accounts)
    ├── /r/{owner}/{repo} read path ─────► R2 snapshots, KV revocation epochs, D1 search
    │        └── permission source ──────► Control Worker (service binding)
@@ -276,7 +276,7 @@ Request
   │   ├─ GET /api/auth/sign-out confirms; same-origin POST → Convex, cookie cleanup
   │   └─ /api/auth/* → Convex proxy
   ├─ 9. Auth and account pages: /sign-in, /sign-up, /verify-email, /forgot-password, /reset-password,
-  │      /home, /account/security
+  │      /home, /account/security, /github/setup (the GitHub App's setup URL, #338)
   ├─ 10. / → landing page, or a redirect to /home when signed in
   ├─ 11. /health → "ok"
   ├─ 12. GET * → shared 404 HTML (no ASSETS fallthrough)
@@ -1176,7 +1176,7 @@ root:
 
 ## Repository Ingest Orchestration (GitHub pivot, P3b)
 
-This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220, part of epic #214). It is built and tested against a fake GitHub, and nothing on the request path uses it yet. The webhook route arrives with P1 (GitHub App), and serving arrives with P4. The content step sits behind the `ContentPipeline` interface in `src/ingest/orchestrator/pipeline.ts`. `contentPipeline()` (`content-pipeline.ts`) adapts the P3a modules above to it: `configFilesToRead`, `detectDocs`, `renderDocument`, `renderKey` and `buildSidebar`. The ingest Worker's main module, `entry.ts`, imports the comrak binary as a `WebAssembly.Module` and initializes the engine before anything renders.
+This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220, part of epic #214). It is built and tested against a fake GitHub, and nothing on the request path uses it yet. The App's one webhook URL is the control Worker's; forwarding `push` from there is still open (#338), and serving arrives with P4. The content step sits behind the `ContentPipeline` interface in `src/ingest/orchestrator/pipeline.ts`. `contentPipeline()` (`content-pipeline.ts`) adapts the P3a modules above to it: `configFilesToRead`, `detectDocs`, `renderDocument`, `renderKey` and `buildSidebar`. The ingest Worker's main module, `entry.ts`, imports the comrak binary as a `WebAssembly.Module` and initializes the engine before anything renders.
 
 | Module | Role |
 |---|---|
@@ -1200,7 +1200,8 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 | `INGEST_COORDINATOR` | Durable Object `RepoIngestCoordinator` (SQLite-backed, migration `v1`) | One instance per repository, named `repo:<GitHub repository ID>` |
 | Cron `*/10 * * * *` | Scheduled handler | Re-checks heads and redelivers failed webhooks |
 | `GITHUB_API_ORIGIN`, `GITHUB_ARCHIVE_ORIGINS` | Vars, optional | Point the client at a fake GitHub; the defaults are `api.github.com` and `codeload.github.com` |
-| `GITHUB_DEV_TOKEN` | Secret, optional | Development token until P1 mints installation tokens; without it requests are unauthenticated |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | Var and secret (production requires them) | The GitHub App's credentials: installation tokens are minted per installation ([Installation tokens](#installation-tokens)), and the reconciliation cron reads the App's webhook deliveries with its JWT |
+| `GITHUB_DEV_TOKEN` | Secret, development and tests only | A static token where the App is not configured; without either, requests are unauthenticated. Production must not set it |
 | `IMAGE_PROXY_SECRET` | Secret, required | Signs image proxy URLs in rendered pages (#224); must equal the serving Worker's value |
 | `REPO_SEARCH` | D1, optional | The repository search index (#251); absent where no database is provisioned, and ingest then skips indexing |
 | `REPO_CONTENT_KEY` | Secret, required | Seals private-repository content (#263); must equal the serving Worker's value. Without a valid one, private repositories are not ingested (`content-unconfigured`, retried) |
@@ -1644,7 +1645,7 @@ Measured with `tests/repo-read-workerd.test.ts` on 2026-10-19 (`search query (1,
 
 ## Repository Permission Mirror (GitHub pivot, P5)
 
-This section covers who may read which repository (#243, part of epic #214): the permission source and revocation epochs the read path's contract asks for (above). GitHub is the authority; the control Worker keeps a mirror current enough that a view never waits on GitHub, and it fails closed: anything it cannot decide is a 503, never a grant. It is built and tested against a fake GitHub (`tests/helpers/fake-github.ts`). Real sign-in (P1) plugs into two interfaces: the account hand-over below, and `InstallationTokenProvider` (#229) for installation tokens.
+This section covers who may read which repository (#243, part of epic #214): the permission source and revocation epochs the read path's contract asks for (above). GitHub is the authority; the control Worker keeps a mirror current enough that a view never waits on GitHub, and it fails closed: anything it cannot decide is a 503, never a grant. It is built and tested against a fake GitHub (`tests/helpers/fake-github.ts`). GitHub sign-in (#338) plugs into two interfaces: the account hand-over below, and `InstallationTokenProvider` (#229), which mints installation tokens from the App's key ([Installation tokens](#installation-tokens)).
 
 | Module | Role |
 |---|---|
@@ -1663,6 +1664,7 @@ This section covers who may read which repository (#243, part of epic #214): the
 |---|---|---|
 | `POST /v1/authorize` (entrypoint `RepoAccessService`) | The serving Worker (`REPO_ACCESS`) | `repoAccessHandler` over the directory: the read path's protocol (#234) |
 | `POST /v1/accounts/link` (entrypoint `RepoAccessService`) | GitHub sign-in (#338), through `REPO_ACCESS` | `{ userId, githubId, login, tokens }`: binds a Rendro user to a GitHub account and stores its user-to-server tokens. 204, no body |
+| `POST /v1/accounts/refresh` (entrypoint `RepoAccessService`) | The App's setup URL (#338), through `REPO_ACCESS` | `{ userId }`: the user just installed the app; their mirror is listed again on its next use. 204 |
 | `POST /v1/accounts/unlink` (entrypoint `RepoAccessService`) | Unlinking GitHub (#338), through `REPO_ACCESS`, before Convex unlinks the account | `{ userId }`: drops the tokens and mirror and revokes the user |
 | `POST /v1/github/webhook` (default handler) | GitHub | Permission events. 202 applied, 200 duplicate, 204 ignored, 400 malformed, 401 bad signature, 503 not configured |
 
@@ -1710,8 +1712,8 @@ A signature covers the body, not the delivery ID, and payloads carry no timestam
 | `repository` transferred | Re-checked | Holders | yes |
 | `repository` publicized, renamed, edited, created, … | Re-checked | – | – |
 | `installation` deleted / suspend | Deleted / suspended | Everyone the installation lists | yes |
-| `installation` created / unsuspend / new_permissions_accepted | Active, re-checked; announced repositories re-checked | Everyone the installation lists | – |
-| `installation_repositories` added / removed | Re-checked / removed | Installation users / holders | removed |
+| `installation` created / unsuspend / new_permissions_accepted | Active, re-checked; announced repositories re-checked | Everyone the installation lists, and the sender (#338) | – |
+| `installation_repositories` added / removed | Re-checked / removed | Installation users and the sender (#338) / holders | removed |
 | `github_app_authorization` revoked | – | The named user: tokens and mirror dropped | yes |
 
 "Re-checked" sets `check`: before that record grants anything again, the directory asks GitHub with an installation token (`GET /repos/{o}/{r}`, or `GET /installation/repositories` for an installation, whose token GitHub refuses once suspended). A replayed `publicized` or `unsuspend` therefore grants nothing GitHub does not confirm. Reaching a user means a new generation: their mirror and single-repository checks are no longer used, and the next authorize asks GitHub. People events never trust the payload's direction either; GitHub's listing decides.
@@ -1741,6 +1743,12 @@ A signature covers the body, not the delivery ID, and payloads carry no timestam
 ### Tokens
 
 User-to-server tokens (`{ accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt }`) are stored as `v1.<IV>.<ciphertext>`: AES-256-GCM with a fresh 12-byte IV, under a key derived with HKDF-SHA256 from the dedicated `GITHUB_TOKEN_KEY` secret and imported once per isolate. The additional data is the Rendro user ID, so a sealed value moved to another user does not open. Tokens never appear in a response, a log line or the serving Worker. Refresh uses GitHub's documented `POST /login/oauth/access_token` with `grant_type=refresh_token`; only `bad_refresh_token` is final. Rotating the key secret makes stored tokens unreadable (503) until users sign in again.
+
+### Installation tokens
+
+With the App configured (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, #338), installation tokens are minted, not configured (`src/ingest/github/app-auth.ts`). An RS256 app JWT is signed with the App's private key. The key is PKCS#1 as GitHub issues it, or PKCS#8; a key pasted with escaped `\n` newlines works too. The JWT is issued a minute in the past, valid nine minutes, `iss` the App ID, and reused until a minute before it expires. With it, `POST /app/installations/{id}/access_tokens` returns the installation's one-hour token. One token per installation is cached until five minutes before it expires, minted once at a time, and dropped when GitHub refuses it (a 401 then renews it once, as before). In the control Worker the cache is also kept at rest in the directory's storage (`installation-token:<id>`), sealed with AES-256-GCM under a key HKDF-derived from `GITHUB_TOKEN_KEY` for this purpose alone, with the installation ID as additional data, so a restart reuses a live token. The ingest Worker keeps one provider per isolate in memory, shared by its coordinators, and nothing at rest.
+
+A deleted installation answers the mint with 404, which the provider reports as `GitHubError("not-found")`. That alone confirms a removal ([Purging removed repositories](#purging-removed-repositories)). A suspended one answers 403, and every other failure is unknown (503). A first view's repository reference names no installation, so the ingest source asks the App for it (`GET /repos/{o}/{r}/installation`, remembered ten minutes, at most 1,000) and reads without a token where the App is not installed. The reconciliation cron reads the App's webhook deliveries with the same JWT. `GITHUB_DEV_TOKEN` is only the development and test fallback when the App is not configured; the production manifest forbids it.
 
 ### Rate budget
 
@@ -1778,8 +1786,9 @@ Real GitHub adds its own latency to a refresh (typically 100–300 ms per reques
 | `REPO_EPOCHS` | KV | Epochs, written here; the serving Worker binds the same namespace to read them |
 | `GITHUB_TOKEN_KEY` | Secret, required | Seals stored user tokens. Dedicated: never equal to another secret |
 | `GITHUB_WEBHOOK_SECRET` | Secret, required | The GitHub App's webhook secret |
-| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Var and secret, optional until P1 | Token refresh; without them an expired user token is a 503 |
-| `GITHUB_DEV_TOKEN` | Secret, optional | Installation token for checks until P1 mints installation tokens |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Var and secret (production requires them) | Token refresh; without them an expired user token is a 503 |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | Var and secret (production requires them) | Installation tokens, minted and kept sealed in the directory ([Installation tokens](#installation-tokens)) |
+| `GITHUB_DEV_TOKEN` | Secret, development and tests only | A static installation token where the App is not configured; production must not set it |
 | `GITHUB_API_ORIGIN`, `GITHUB_WEB_ORIGIN` | Vars, optional | Point at a fake GitHub; the defaults are `api.github.com` and `github.com` |
 | `CONVEX_URL`, `CONVEX_INTERNAL_SECRET` | Var and secret, optional | Comments (#254): Convex hears every epoch and removed repository. Both are needed; without them comment grants end with their own lifetime (at most five minutes) |
 | `REPO_INGEST` | Durable Object binding, optional | The ingest Worker's `RepoIngestCoordinator` (`script_name` the ingest Worker): a confirmed removal purges the repository's cached R2 content and search rows (#263) |
@@ -1805,7 +1814,7 @@ A single-repository check that finds the repository accessible during the window
 
 ### Open points
 
-- One GitHub App has one webhook URL, but push events go to the ingest Worker (#229) and permission events here. P1 decides on a single ingress; the recommendation is the control Worker verifying once and forwarding `push` to the ingest queue.
+- One GitHub App has one webhook URL, and it is this Worker's. Push events are acknowledged and ignored here (#338 left the ingress open): the recommendation stays the control Worker verifying once and forwarding `push` to the ingest queue. Until then the ingest Worker's reconciliation cron brings branches up to date.
 - Asset tickets are only epoch-checked, so a missed webhook can leave an open commit's frame images readable for a ticket's five minutes (the cookie's lifetime since #293).
 - With KV Instant, the serving Worker's `cacheTtl: 60` becomes the dominant term.
 - Commit-pinned frames of public repositories are cached `public, immutable`; a repository made private stays readable from browser caches that already hold a page.

@@ -292,6 +292,9 @@ export class AccessDirectory {
       case "/unlink":
         await this.forget(body.userId as string);
         return new Response(null, { status: 204 });
+      case "/refresh":
+        await this.refreshUser(body.userId as string);
+        return new Response(null, { status: 204 });
       case "/webhook":
         return Response.json({ status: await this.applyWebhook(body.deliveryId as string, body.plan as EventPlan) });
       default:
@@ -662,6 +665,14 @@ export class AccessDirectory {
     await this.replaceHoldings(userId, await this.storage.get<Mirror>(`mirror:${userId}`) ?? null, null);
     await this.storage.delete([`mirror:${userId}`]);
     await this.enqueueRevocations([userId]);
+  }
+
+  /**
+   * The user came back from installing the app (#338): their mirror is listed again on its next use, so the new
+   * installation shows at once. It only makes the next decision ask GitHub; an unknown user changes nothing.
+   */
+  async refreshUser(userId: string): Promise<void> {
+    if (await this.user(userId)) await this.invalidate(userId);
   }
 
   // ---- Webhooks ------------------------------------------------------------

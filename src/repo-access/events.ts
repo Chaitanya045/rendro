@@ -72,6 +72,16 @@ function repoHints(value: unknown): RepoHint[] | null {
 }
 
 /**
+ * Whoever installed the app, or added repositories to it, is not yet among the users the installation lists, but
+ * is about to open their home (#338): their mirror is refreshed too. Reaching a user only makes the next decision
+ * ask GitHub, so a forged sender gains nothing.
+ */
+function withSender(plan: EventPlan, body: Payload): EventPlan {
+  const sender = id(field(body.sender, "id"));
+  return sender === null ? plan : { ...plan, users: [sender] };
+}
+
+/**
  * The plan for one verified delivery: `ignored` for events and actions that
  * change no access, `malformed` when a relevant payload is missing what the
  * plan needs (the delivery fails, and the TTL backstop applies).
@@ -139,7 +149,7 @@ export function planEvent(event: string | null, payload: unknown): EventPlan | "
         if (!hints) return "malformed";
         const plan: EventPlan = { installation: { id: installation, account: owner, state: "active" }, installationUsers: installation, revoke: false };
         if (hints.length) plan.repos = { change: "confirm", hints, installation };
-        return plan;
+        return withSender(plan, body);
       }
       return "ignored";
     }
@@ -149,7 +159,7 @@ export function planEvent(event: string | null, payload: unknown): EventPlan | "
       const hints = repoHints(action === "added" ? body.repositories_added : body.repositories_removed);
       if (!hints) return "malformed";
       return action === "added"
-        ? { repos: { change: "confirm", hints, installation }, installationUsers: installation, revoke: false }
+        ? withSender({ repos: { change: "confirm", hints, installation }, installationUsers: installation, revoke: false }, body)
         : { repos: { change: "remove", hints, installation }, holders: hints.map((hint) => hint.id), revoke: true };
     }
     default: {

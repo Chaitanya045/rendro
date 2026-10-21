@@ -89,6 +89,10 @@ describe("errors", () => {
     expect(toIngestError(new GitHubError("rate-limited", "wait", 429, 1234))).toMatchObject({ reason: "github-rate-limited", permanent: false, retryAt: 1234 });
     expect(toIngestError(new Error("R2 down"))).toMatchObject({ reason: "internal", message: "R2 down", permanent: false, retryAt: null });
     expect(toIngestError("weird")).toMatchObject({ reason: "internal", message: "Ingest failed" });
+    const original = new Error("false == true");
+    expect(toIngestError(original).cause).toBe(original);
+    const gone = new GitHubError("not-found", "gone", 404);
+    expect(toIngestError(gone).cause).toBe(gone);
     expect(new GitHubError("server", "x").transient).toBe(true);
   });
 });

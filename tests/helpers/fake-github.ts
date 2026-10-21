@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, createPublicKey, generateKeyPairSync, randomBytes, randomUUID, verify, type KeyObject } from "node:crypto";
 import { githubArchive, gzip } from "./tar-writer";
 
 /**
@@ -25,7 +25,8 @@ interface TreeItem {
 }
 
 export type Endpoint = "ref" | "tree" | "blob" | "tarball" | "archive" | "deliveries" | "redeliver"
-  | "user-installations" | "installation-repositories" | "installation" | "repository" | "permission" | "oauth" | "user" | "other";
+  | "user-installations" | "installation-repositories" | "installation" | "repository" | "permission" | "oauth" | "user"
+  | "app-token" | "repo-installation" | "other";
 
 export interface FakeUser {
   id: number;
@@ -93,6 +94,16 @@ export interface FakeDelivery {
 
 const encoder = new TextEncoder();
 
+/** The App's RSA key pair (#338), made once per process: generating one per fake would slow every test. */
+let appKeys: { privateKey: string; publicKey: KeyObject } | null = null;
+function fakeAppKeys() {
+  if (!appKeys) {
+    const pair = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs1", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+    appKeys = { privateKey: pair.privateKey, publicKey: createPublicKey(pair.publicKey) };
+  }
+  return appKeys;
+}
+
 function sha1(data: Uint8Array | string): string {
   return createHash("sha1").update(data).digest("hex");
 }
@@ -155,6 +166,13 @@ export class FakeGitHub {
   readonly archiveOrigin = "https://codeload.github.test";
   readonly token = "fake-installation-token";
   readonly appJwt = "fake-app-jwt";
+  /** The App's ID and private key (#338): an RS256 JWT with `iss` the ID authenticates the /app/ endpoints. */
+  readonly appId = "4242";
+  get appPrivateKey(): string {
+    return fakeAppKeys().privateKey;
+  }
+  /** Lifetime of minted installation tokens (GitHub: one hour). */
+  installationTokenLifetime = 60 * 60 * 1000;
   readonly blobs = new Map<string, Uint8Array>();
   readonly trees = new Map<string, TreeItem[]>();
   readonly commits = new Map<string, { tree: string; files: Map<string, FileSpec> }>();
@@ -191,7 +209,7 @@ export class FakeGitHub {
   refreshTokenLifetime = 184 * 24 * 60 * 60 * 1000;
   private readonly accessTokens = new Map<string, { user: number; expiresAt: number | null }>();
   private readonly refreshTokens = new Map<string, { user: number; expiresAt: number }>();
-  private readonly installationTokens = new Map<string, number>();
+  private readonly installationTokens = new Map<string, { installation: number; expiresAt: number | null }>();
   /** User ID → the addresses `GET /user/emails` lists (#338). */
   readonly emails = new Map<number, FakeEmail[]>();
   private readonly authorizationCodes = new Map<string, FakeAuthorizationCode>();
@@ -283,7 +301,7 @@ export class FakeGitHub {
   /** An installation-scoped token, as P1 will mint (the shared `token` reads everything). */
   installationToken(installation: FakeInstallation): string {
     const token = `ghs_${installation.id}_${randomBytes(6).toString("hex")}`;
-    this.installationTokens.set(token, installation.id);
+    this.installationTokens.set(token, { installation: installation.id, expiresAt: null });
     return token;
   }
 
@@ -426,6 +444,13 @@ export class FakeGitHub {
     if (url.origin !== this.origin) return new Response("unknown origin", { status: 502 });
     if (url.pathname.startsWith("/app/")) return this.app(request, url);
     if (url.pathname === "/user" || url.pathname.startsWith("/user/")) return this.userApi(request, url);
+    const lookup = /^\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(url.pathname);
+    if (lookup) {
+      if (!this.appAuthorized(request)) return this.json({ message: "A JSON web token could not be decoded" }, 401);
+      const repo = this.repos.get(`${decodeURIComponent(lookup[1])}/${decodeURIComponent(lookup[2])}`);
+      const installation = repo ? this.installationOf(repo) : undefined;
+      return installation ? this.json({ id: installation.id, account: { login: installation.account } }) : this.json({ message: "Not Found" }, 404);
+    }
     const authorization = request.headers.get("authorization");
     const scope = this.installationScope(authorization);
     if (scope === "invalid") return this.json({ message: "Bad credentials" }, 401);
@@ -514,7 +539,8 @@ export class FakeGitHub {
   private installationScope(authorization: string | null): "all" | FakeInstallation | "invalid" | undefined {
     if (!authorization) return undefined;
     if (authorization === `Bearer ${this.token}`) return "all";
-    const installation = this.installations.get(this.installationTokens.get(authorization.slice("Bearer ".length)) ?? -1);
+    const grant = this.installationTokens.get(authorization.slice("Bearer ".length));
+    const installation = grant && (grant.expiresAt === null || grant.expiresAt > this.now()) ? this.installations.get(grant.installation) : undefined;
     return installation ?? "invalid";
   }
 
@@ -608,8 +634,36 @@ export class FakeGitHub {
     return new Response(data as Uint8Array<ArrayBuffer>, { headers: { "content-type": "application/x-gzip" } });
   }
 
+  /** The shared test JWT, or an RS256 JWT signed with the App's key: `iss` the App ID, issued in the past, at most ten minutes long, unexpired. */
+  private appAuthorized(request: Request): boolean {
+    const authorization = request.headers.get("authorization") ?? "";
+    if (authorization === `Bearer ${this.appJwt}`) return true;
+    const [header, payload, signature] = authorization.slice("Bearer ".length).split(".");
+    if (!header || !payload || !signature) return false;
+    try {
+      const head = JSON.parse(Buffer.from(header, "base64url").toString()) as { alg?: string };
+      const claims = JSON.parse(Buffer.from(payload, "base64url").toString()) as { iat?: number; exp?: number; iss?: string };
+      const now = Math.floor(this.now() / 1000);
+      return head.alg === "RS256" && claims.iss === this.appId && typeof claims.iat === "number" && typeof claims.exp === "number"
+        && claims.iat <= now + 60 && claims.exp > now && claims.exp - claims.iat <= 600
+        && verify("sha256", Buffer.from(`${header}.${payload}`), fakeAppKeys().publicKey, Buffer.from(signature, "base64url"));
+    } catch {
+      return false;
+    }
+  }
+
   private app(request: Request, url: URL): Response {
-    if (request.headers.get("authorization") !== `Bearer ${this.appJwt}`) return this.json({ message: "A JSON web token could not be decoded" }, 401);
+    if (!this.appAuthorized(request)) return this.json({ message: "A JSON web token could not be decoded" }, 401);
+    const mint = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(url.pathname);
+    if (mint && request.method === "POST") {
+      const installation = this.installations.get(Number(mint[1]));
+      if (!installation) return this.json({ message: "Not Found" }, 404);
+      if (installation.suspended) return this.json({ message: "This installation has been suspended" }, 403);
+      const token = `ghs_${installation.id}_${randomBytes(8).toString("hex")}`;
+      const expiresAt = this.now() + this.installationTokenLifetime;
+      this.installationTokens.set(token, { installation: installation.id, expiresAt });
+      return this.json({ token, expires_at: new Date(expiresAt).toISOString(), permissions: { contents: "read", metadata: "read" } }, 201);
+    }
     const attempts = /^\/app\/hook\/deliveries\/(\d+)\/attempts$/.exec(url.pathname);
     if (attempts && request.method === "POST") {
       const original = this.deliveries.find((delivery) => delivery.id === Number(attempts[1]));
@@ -665,6 +719,8 @@ function classify(url: URL): Endpoint {
   if (url.pathname === "/installation/repositories") return "installation";
   if (/^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) return "repository";
   if (/^\/repos\/[^/]+\/[^/]+\/collaborators\/[^/]+\/permission$/.test(url.pathname)) return "permission";
+  if (/^\/app\/installations\/\d+\/access_tokens$/.test(url.pathname)) return "app-token";
+  if (/^\/repos\/[^/]+\/[^/]+\/installation$/.test(url.pathname)) return "repo-installation";
   if (/\/attempts$/.test(url.pathname)) return "redeliver";
   if (url.pathname.startsWith("/app/hook/deliveries")) return "deliveries";
   if (/\/git\/ref\//.test(url.pathname)) return "ref";

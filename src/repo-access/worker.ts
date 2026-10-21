@@ -4,8 +4,9 @@
  *
  * - `POST /v1/authorize`: `repoAccessHandler` over the access directory (the
  *   read path's permission source).
- * - `POST /v1/accounts/link` and `/unlink`: where P1's sign-in hands over a
- *   user's GitHub identity and tokens.
+ * - `POST /v1/accounts/link` and `/unlink`: where GitHub sign-in hands over a
+ *   user's GitHub identity and tokens (#338), and `/refresh`: the user just
+ *   installed the app, so their mirror is listed again on its next use.
  * - `POST /v1/github/webhook`: GitHub's permission events, verified and
  *   deduplicated like #229's push webhook.
  *
@@ -17,6 +18,7 @@
  * response or a log line.
  */
 import { isDeliveryId, readVerifiedWebhook } from "@/ingest/github/webhook";
+import { appJwtSigner, gitHubAppCredentials, mintedInstallationTokens } from "@/ingest/github/app-auth";
 import { staticTokenProvider } from "@/ingest/github/token";
 import type { DurableObjectNamespaceLike } from "@/ingest/orchestrator/coordinator-client";
 import { isOwnerLogin } from "@/ingest/orchestrator/messages";
@@ -42,7 +44,10 @@ export interface ControlWorkerEnv {
   /** Development and tests: a fake GitHub's REST and web origins. */
   GITHUB_API_ORIGIN?: string;
   GITHUB_WEB_ORIGIN?: string;
-  /** Development and tests only, until P1 mints installation tokens. */
+  /** The GitHub App's ID and private key (#338): installation tokens are minted from them. */
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  /** Development and tests only: a static installation token where the App is not configured. */
   GITHUB_DEV_TOKEN?: string;
   /** Comments on repository docs (#254): Convex, told about every epoch and removed repository. Optional. */
   CONVEX_URL?: string;
@@ -87,7 +92,7 @@ function validUserId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256;
 }
 
-async function accounts(request: Request, env: ControlWorkerEnv, path: "link" | "unlink"): Promise<Response> {
+async function accounts(request: Request, env: ControlWorkerEnv, path: "link" | "unlink" | "refresh"): Promise<Response> {
   if (request.method !== "POST") return new Response(null, { status: 405 });
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!validUserId(body?.userId)) return Response.json({ error: "Malformed request" }, { status: 400 });
@@ -137,9 +142,20 @@ export const RepoAccessService = {
     if (pathname === "/v1/authorize") return repoAccessHandler(directorySource(env))(request);
     if (pathname === "/v1/accounts/link") return accounts(request, env, "link");
     if (pathname === "/v1/accounts/unlink") return accounts(request, env, "unlink");
+    if (pathname === "/v1/accounts/refresh") return accounts(request, env, "refresh");
     return new Response(null, { status: 404 });
   },
 };
+
+/**
+ * Installation tokens minted from the App's key and kept sealed in the directory's storage (#338); without the
+ * App, development and tests use `GITHUB_DEV_TOKEN` (or none).
+ */
+function installationTokens(state: DirectoryState, env: ControlWorkerEnv, tokenKey: string) {
+  const app = gitHubAppCredentials(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY);
+  if (!app) return staticTokenProvider(env.GITHUB_DEV_TOKEN || null);
+  return mintedInstallationTokens({ app: appJwtSigner(app), apiOrigin: env.GITHUB_API_ORIGIN || undefined, store: { storage: state.storage, secret: tokenKey } });
+}
 
 /** The single directory instance (named "directory"): registry, mirrors and the epoch outbox. */
 export class RepoAccessDirectory {
@@ -151,7 +167,7 @@ export class RepoAccessDirectory {
     this.directory = validSecret(tokenKey) && tokenKey !== env.GITHUB_WEBHOOK_SECRET && tokenKey !== env.GITHUB_APP_CLIENT_SECRET
       ? new AccessDirectory(state, {
         github: new GitHubAccessClient({ apiOrigin: env.GITHUB_API_ORIGIN || undefined }),
-        installationTokens: staticTokenProvider(env.GITHUB_DEV_TOKEN || null),
+        installationTokens: installationTokens(state, env, tokenKey),
         refresher: env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_CLIENT_SECRET
           ? httpTokenRefresher({ clientId: env.GITHUB_APP_CLIENT_ID, clientSecret: env.GITHUB_APP_CLIENT_SECRET, webOrigin: env.GITHUB_WEB_ORIGIN || undefined, now: () => Date.now() })
           : unconfiguredRefresher,
