@@ -31,7 +31,8 @@ function wired(): Configs {
     "wrangler.ingest.toml": {
       name: "rendro-ingest",
       workers_dev: false,
-      secrets: { required: ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"] },
+      secrets: { required: ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY", "GITHUB_APP_PRIVATE_KEY"] },
+      vars: { GITHUB_APP_ID: "4242" },
       r2_buckets: [{ binding: "INGEST_BUCKET", bucket_name: "rendro-ingest" }],
       queues: { producers: [{ binding: "INGEST_QUEUE", queue: "rendro-ingest" }], consumers: [{ queue: "rendro-ingest", dead_letter_queue: "rendro-ingest-dlq" }] },
       durable_objects: { bindings: [{ name: "INGEST_COORDINATOR", class_name: "RepoIngestCoordinator" }] },
@@ -42,8 +43,8 @@ function wired(): Configs {
     "wrangler.control.toml": {
       name: "rendro-control",
       workers_dev: false,
-      secrets: { required: ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_APP_CLIENT_SECRET", "CONVEX_INTERNAL_SECRET"] },
-      vars: { GITHUB_APP_CLIENT_ID: "Iv1.0000", CONVEX_URL: "https://example.convex.cloud" },
+      secrets: { required: ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_APP_CLIENT_SECRET", "GITHUB_APP_PRIVATE_KEY", "CONVEX_INTERNAL_SECRET"] },
+      vars: { GITHUB_APP_CLIENT_ID: "Iv1.0000", GITHUB_APP_ID: "4242", CONVEX_URL: "https://example.convex.cloud" },
       durable_objects: { bindings: [
         { name: "REPO_ACCESS_DIRECTORY", class_name: "RepoAccessDirectory" },
         { name: "REPO_INGEST", class_name: "RepoIngestCoordinator", script_name: "rendro-ingest" },
@@ -59,8 +60,8 @@ function wired(): Configs {
 function secretsSet(): Record<string, string[]> {
   return {
     rendro: ["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"],
-    "rendro-ingest": ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"],
-    "rendro-control": ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_APP_CLIENT_SECRET", "CONVEX_INTERNAL_SECRET"],
+    "rendro-ingest": ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY", "GITHUB_APP_PRIVATE_KEY"],
+    "rendro-control": ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_APP_CLIENT_SECRET", "GITHUB_APP_PRIVATE_KEY", "CONVEX_INTERNAL_SECRET"],
   };
 }
 

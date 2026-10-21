@@ -80,6 +80,7 @@ const CONTROL = "TECHNICAL.md#bindings-and-configuration-development-and-tests-o
 const RUM = "TECHNICAL.md#post-rum";
 const CONVEX = "TECHNICAL.md#environment-variables-convex";
 const GITHUB_SIGN_IN = "TECHNICAL.md#github-sign-in-p1";
+const APP_TOKENS = "TECHNICAL.md#installation-tokens";
 
 const serving: WorkerDeployable = {
   title: "Serving Worker",
@@ -133,7 +134,9 @@ const ingest: WorkerDeployable = {
     { kind: "secret", name: "IMAGE_PROXY_SECRET", need: "required", purpose: "Signs image proxy URLs in rendered pages; equals the serving Worker's value", doc: INGEST },
     { kind: "secret", name: "REPO_CONTENT_KEY", need: "required", purpose: "Seals private-repository content; without it private repositories are not ingested", doc: INGEST },
     { kind: "secret", name: "REPO_CONTENT_KEY_PREVIOUS", need: "optional", purpose: "The previous content key, during a key rotation only", doc: "TECHNICAL.md#key-rotation" },
-    { kind: "secret", name: "GITHUB_DEV_TOKEN", need: "optional", purpose: "GitHub token until installation tokens are minted; unauthenticated without it", doc: INGEST },
+    { kind: "var", name: "GITHUB_APP_ID", need: "required", purpose: "The GitHub App's ID: the issuer of its JWT, for installation tokens and redelivery", doc: APP_TOKENS },
+    { kind: "secret", name: "GITHUB_APP_PRIVATE_KEY", need: "required", purpose: "The GitHub App's private key (PEM); signs the app JWT", doc: APP_TOKENS },
+    { kind: "secret", name: "GITHUB_DEV_TOKEN", need: "forbidden", purpose: "A static installation token for development and tests, where the App is not configured", doc: INGEST },
     { kind: "var", name: "GITHUB_API_ORIGIN", need: "forbidden", purpose: "Points the client at a fake GitHub (tests)", doc: INGEST },
     { kind: "var", name: "GITHUB_ARCHIVE_ORIGINS", need: "forbidden", purpose: "Archive redirect origins of a fake GitHub (tests)", doc: INGEST },
     { kind: "var", name: "REPO_IDLE_EXPIRY_SECONDS", need: "forbidden", purpose: "Shortens the 30-day idle window (tests)", doc: INGEST },
@@ -166,7 +169,9 @@ const control: WorkerDeployable = {
     { kind: "var", name: "GITHUB_APP_CLIENT_ID", need: "required", purpose: "The GitHub App's OAuth client ID, for token refresh", doc: CONTROL },
     { kind: "secret", name: "CONVEX_INTERNAL_SECRET", need: "required", purpose: "Tells Convex about epochs and removals, so comment access ends at once", doc: CONTROL },
     { kind: "var", name: "CONVEX_URL", need: "required", purpose: "The Convex deployment the comment sink calls", doc: CONTROL },
-    { kind: "secret", name: "GITHUB_DEV_TOKEN", need: "optional", purpose: "Installation token for checks until installation tokens are minted", doc: CONTROL },
+    { kind: "var", name: "GITHUB_APP_ID", need: "required", purpose: "The GitHub App's ID: the issuer of its JWT, for installation tokens", doc: APP_TOKENS },
+    { kind: "secret", name: "GITHUB_APP_PRIVATE_KEY", need: "required", purpose: "The GitHub App's private key (PEM); installation tokens are minted with it", doc: APP_TOKENS },
+    { kind: "secret", name: "GITHUB_DEV_TOKEN", need: "forbidden", purpose: "A static installation token for development and tests, where the App is not configured", doc: CONTROL },
     { kind: "var", name: "GITHUB_API_ORIGIN", need: "forbidden", purpose: "Points the client at a fake GitHub (tests)", doc: CONTROL },
     { kind: "var", name: "GITHUB_WEB_ORIGIN", need: "forbidden", purpose: "Points token refresh at a fake GitHub (tests)", doc: CONTROL },
   ],

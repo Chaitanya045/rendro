@@ -27,7 +27,7 @@ export function repoAccessBinding(env: unknown): Fetcher | null {
   return binding && typeof (binding as Fetcher).fetch === "function" ? binding as Fetcher : null;
 }
 
-async function post(binding: Fetcher, path: "link" | "unlink", body: unknown): Promise<boolean> {
+async function post(binding: Fetcher, path: "link" | "unlink" | "refresh", body: unknown): Promise<boolean> {
   try {
     const response = await binding.fetch(new Request(`${ACCOUNTS_URL}/${path}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -55,4 +55,11 @@ export async function unlinkGitHubAccount(binding: Fetcher, userId: string): Pro
   const unlinked = await post(binding, "unlink", { userId });
   if (!unlinked) logger.error({ category: "GitHubHandOff", outcome: "unlink-unavailable" }, "GitHub account was not unlinked");
   return unlinked;
+}
+
+/** The reader just installed the app (#338): their mirror is listed again on its next use. Best effort: a failure only waits for the mirror's TTL. */
+export async function refreshGitHubAccount(binding: Fetcher, userId: string): Promise<boolean> {
+  const refreshed = await post(binding, "refresh", { userId });
+  if (!refreshed) logger.error({ category: "GitHubHandOff", outcome: "refresh-unavailable" }, "GitHub account was not refreshed");
+  return refreshed;
 }

@@ -7,6 +7,7 @@ import { repoAccessBinding } from "@/github-hand-off";
 import { logger } from "@/logger";
 import appRoutes from "@/routes/app";
 import authPageRoutes from "@/routes/auth-pages";
+import githubSetupRoutes from "@/routes/github-setup";
 import imageProxyRoutes from "@/routes/image-proxy";
 import repoReadRoutes from "@/repo-read/routes";
 import rumRoutes from "@/rum/route";
@@ -48,6 +49,8 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   });
 
   app.route("/", authPageRoutes);
+  // The GitHub App's setup URL (#338).
+  app.route("/", githubSetupRoutes);
 
   app.route("/", appRoutes);
   app.get("/health", (c) => c.text("ok"));

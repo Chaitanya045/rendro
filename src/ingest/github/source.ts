@@ -10,7 +10,7 @@ export interface RepoRef {
   owner: string;
   name: string;
   private: boolean;
-  /** GitHub App installation whose token reads this repo; null until P1 provides installations. */
+  /** GitHub App installation whose token reads this repo; null when the caller does not know it (a first view: the minting provider looks it up, #338). */
   installationId: number | null;
 }
 

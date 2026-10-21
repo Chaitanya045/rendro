@@ -17,7 +17,7 @@ export interface WebhookDeliveries {
   redeliver(id: number): Promise<void>;
 }
 
-/** Signs app JWTs (RS256 with the app's private key). Supplied by P1. */
+/** Signs app JWTs (RS256 with the app's private key): `appJwtSigner` (#338). */
 export interface AppJwtProvider {
   jwt(): Promise<string>;
 }

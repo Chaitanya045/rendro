@@ -1,8 +1,8 @@
 /**
- * Installation tokens. P1 (GitHub App sign-in) supplies a provider that mints
- * and caches a token per installation until shortly before its one-hour expiry.
- * Until then the ingest Worker runs with a static development token or none
- * (public repositories, unauthenticated limits).
+ * Installation tokens. With the GitHub App configured, a provider mints and
+ * caches one per installation until shortly before its one-hour expiry
+ * (`mintedInstallationTokens`, #338). Without it, development and tests run
+ * with a static token or none (public repositories, unauthenticated limits).
  */
 export interface InstallationTokenProvider {
   /**
@@ -13,6 +13,8 @@ export interface InstallationTokenProvider {
   token(installationId: number | null): Promise<string | null>;
   /** Drop a token GitHub rejected (401), so the next call mints a fresh one. */
   invalidate(installationId: number | null): void;
+  /** A minting provider can name the App's installation on a repository whose reference has none (a first view). */
+  installationOf?(owner: string, name: string): Promise<number | null>;
 }
 
 export function staticTokenProvider(token: string | null): InstallationTokenProvider {

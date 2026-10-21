@@ -36,7 +36,7 @@ export type RemovalVerdict =
 export interface RemovalCheck {
   github: GitHubAccessClient;
   /**
-   * Installation tokens. A provider that mints them (P1) throws
+   * Installation tokens. A provider that mints them (#338) throws
    * `GitHubError("not-found")` when GitHub reports the installation gone: that
    * alone confirms the removal. A null token confirms nothing.
    */

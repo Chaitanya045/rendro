@@ -105,7 +105,7 @@ async function headMoved(source: GitHubSource, etags: RefEtagCache, repo: RepoRe
 
 export class CommitIngestError extends IngestError {
   constructor(cause: IngestError, readonly commit: string) {
-    super(cause.reason, cause.message, cause.permanent, cause.retryAt);
+    super(cause.reason, cause.message, cause.permanent, cause.retryAt, cause.cause);
     this.name = "CommitIngestError";
   }
 }

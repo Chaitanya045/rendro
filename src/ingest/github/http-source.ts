@@ -70,7 +70,7 @@ export class HttpGitHubSource implements GitHubSource {
     try {
       response = await this.send({
         endpoint: "ref", url: this.repoUrl(repo, `git/ref/heads/${path}`), accept: "application/vnd.github+json",
-        etag: cached?.etag, authenticated: true, installationId: repo.installationId,
+        etag: cached?.etag, authenticated: true, installationId: await this.installation(repo),
       });
     } catch (error) {
       // 409 is an empty repository; both mean "no commit to ingest".
@@ -94,7 +94,7 @@ export class HttpGitHubSource implements GitHubSource {
     requireObjectId(sha);
     const response = await this.send({
       endpoint: "tree", url: this.repoUrl(repo, `git/trees/${sha}${recursive ? "?recursive=1" : ""}`),
-      accept: "application/vnd.github+json", authenticated: true, installationId: repo.installationId,
+      accept: "application/vnd.github+json", authenticated: true, installationId: await this.installation(repo),
     });
     return parseTree(await readJson(response, MAX_TREE_BYTES), recursive);
   }
@@ -103,7 +103,7 @@ export class HttpGitHubSource implements GitHubSource {
     requireObjectId(sha);
     const response = await this.send({
       endpoint: "blob", url: this.repoUrl(repo, `git/blobs/${sha}`), accept: "application/vnd.github.raw+json",
-      authenticated: true, installationId: repo.installationId,
+      authenticated: true, installationId: await this.installation(repo),
     });
     const bytes = await readBytes(response, maxBytes);
     if (!await matchesBlobId(bytes, sha)) throw new GitHubError("invalid-response", "Blob content does not match its ID", response.status);
@@ -114,7 +114,7 @@ export class HttpGitHubSource implements GitHubSource {
     requireObjectId(sha);
     let response = await this.send({
       endpoint: "tarball", url: this.repoUrl(repo, `tarball/${sha}`), accept: "application/vnd.github+json",
-      authenticated: true, installationId: repo.installationId,
+      authenticated: true, installationId: await this.installation(repo),
     });
     if (response.status >= 300) {
       // The archive link is temporary (five minutes for private repos): follow it now, never store it.
@@ -134,6 +134,12 @@ export class HttpGitHubSource implements GitHubSource {
     }
     if (!response.body) throw new GitHubError("invalid-response", "Archive response has no body", response.status);
     return response.body.pipeThrough(new DecompressionStream("gzip"));
+  }
+
+  /** The repository's installation: its reference's, or, for one without (a first view's), the App's answer (#338). */
+  private async installation(repo: RepoRef): Promise<number | null> {
+    if (repo.installationId !== null || !this.tokens.installationOf) return repo.installationId;
+    return this.tokens.installationOf(repo.owner, repo.name);
   }
 
   private repoUrl(repo: RepoRef, path: string): string {
