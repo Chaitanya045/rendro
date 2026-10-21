@@ -12,7 +12,7 @@ function wired(): Configs {
     "wrangler.toml": {
       name: "rendro",
       secrets: { required: ["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"] },
-      vars: { NODE_ENV: "production", CONVEX_URL: "https://example.convex.cloud", GITHUB_APP_CLIENT_ID: "Iv1.0000" },
+      vars: { NODE_ENV: "production", CONVEX_URL: "https://example.convex.cloud", GITHUB_APP_CLIENT_ID: "Iv1.0000", GITHUB_APP_SLUG: "rendro" },
       assets: { directory: "./public", binding: "ASSETS" },
       r2_buckets: [{ binding: "REPO_CONTENT", bucket_name: "rendro-ingest" }],
       kv_namespaces: [{ binding: "REPO_EPOCHS", id: KV }],

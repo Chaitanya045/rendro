@@ -50,7 +50,7 @@ async function privatePage(label: string) {
   return { path, commit: (await response.json() as { commit: string }).commit };
 }
 
-test("a reader signs in with GitHub, opens a private repository's docs and comments on them", async ({ page }, info) => {
+test("a reader signs in with GitHub, finds their private repository on the home, opens its docs and comments on them", async ({ page }, info) => {
   test.setTimeout(120_000);
   const login = githubSignInLogin(info.project.name);
   const consent = await githubConsent(page, login);
@@ -59,9 +59,18 @@ test("a reader signs in with GitHub, opens a private repository's docs and comme
   await consent();
   await page.waitForURL(url => url.pathname === "/home");
   await expect(page.getByText(`${login}@example.test`)).toBeVisible();
-  // The control Worker now holds the reader's GitHub tokens: their private repository opens.
+  // The control Worker now holds the reader's GitHub tokens: the home lists what GitHub lets them read (#338),
+  // the two private repositories they collaborate on and none of the others, and each opens its docs.
+  const { commentsPrivate, closed } = repos();
+  const listed = page.getByRole("region", { name: "Your repositories" }).getByRole("listitem");
+  await expect(listed).toHaveCount(2);
+  // closed-docs carries a last push (the fixture's), so it comes first; comment-private has none.
+  await expect(listed.getByRole("link")).toHaveText([`${closed.owner}/${closed.name}PrivateUpdated Oct 1, 2026`, `${commentsPrivate.owner}/${commentsPrivate.name}Private`]);
+  await page.getByRole("link", { name: `${commentsPrivate.owner}/${commentsPrivate.name}` }).click();
+  await page.waitForURL(url => url.pathname === `/r/${commentsPrivate.owner}/${commentsPrivate.name}`);
+  await expect(page.locator("#content-frame")).toBeAttached();
   const doc = await privatePage("github");
-  await open(page, repos().commentsPrivate, doc.path, doc.commit);
+  await open(page, commentsPrivate, doc.path, doc.commit);
   await expect(ui(page).getByText("Only collaborators read this.")).toBeVisible();
   await comment(page, "Only collaborators", unique("Signed in with GitHub"));
 });

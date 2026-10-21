@@ -81,7 +81,7 @@ export default async function globalSetup(config?: FullConfig) {
     const world = repositoryWorld({ visual: process.env.RENDRO_E2E_VISUAL === "1" });
     // GitHub sign-in is configured (#338): the pages offer it, and Convex's calls to github.com and api.github.com
     // terminate in the identity fixture, which answers them from the same fake GitHub the control Worker reads.
-    Object.assign(vars, { GITHUB_APP_CLIENT_ID: world.github.clientId });
+    Object.assign(vars, { GITHUB_APP_CLIENT_ID: world.github.clientId, GITHUB_APP_SLUG: "rendro-e2e" });
     identity.github.fetch = request => world.github.publicFetch(request);
     // The control Worker also tells the local Convex about revocations and removed repositories (#254).
     // The control Worker mints installation tokens from the fake App's key (#338), as production does: no shared token.

@@ -24,6 +24,8 @@ export interface ListedRepo {
   name: string;
   private: boolean;
   defaultBranch: string;
+  /** When it was last pushed to (epoch ms), where a listing says (#338): the home shows it. */
+  pushedAt?: number;
 }
 
 /** A repository as `GET /repos/{owner}/{name}` answered it, with that response's validator. */
@@ -61,6 +63,14 @@ export function parseListedRepo(value: unknown): ListedRepo | null {
   if (!repo || !positiveId(repo.id) || !isRepoName(repo.name) || !isOwnerLogin(repo.owner?.login) || typeof repo.private !== "boolean"
     || !isBranchName(repo.default_branch)) return null;
   return { id: repo.id, owner: repo.owner.login, name: repo.name, private: repo.private, defaultBranch: repo.default_branch };
+}
+
+/** A listed repository, with its last push when the listing has one. */
+function parseListing(value: unknown): ListedRepo | null {
+  const repo = parseListedRepo(value);
+  const pushed = (value as { pushed_at?: unknown } | null)?.pushed_at;
+  const pushedAt = typeof pushed === "string" ? Date.parse(pushed) : NaN;
+  return repo && Number.isSafeInteger(pushedAt) && pushedAt > 0 ? { ...repo, pushedAt } : repo;
 }
 
 function parseInstallation(value: unknown): ListedInstallation | null {
@@ -132,7 +142,7 @@ export class GitHubAccessClient {
     }
     if (!response) return null;
     const body = await readJson(response) as { repositories?: unknown };
-    return { items: parseAll(body?.repositories, parseListedRepo), etag: response.headers.get("etag"), next: hasNext(response) };
+    return { items: parseAll(body?.repositories, parseListing), etag: response.headers.get("etag"), next: hasNext(response) };
   }
 
   /**

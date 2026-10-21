@@ -90,6 +90,8 @@ export function repositoryWorld(options: { visual?: boolean } = {}) {
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
   repos.closed.collaborators.add(people.owner.id);
   repos.commentsPrivate.collaborators.add(people.owner.id);
+  // The home shows a repository's last push where GitHub's listing reports one (#338); a fixed time keeps the visual baselines stable.
+  repos.closed.pushedAt = Date.parse("2026-10-01T09:30:00Z");
   // Readers who sign in with GitHub (#338), one per engine so the engines never share an account.
   ["chromium", "firefox", "webkit"].forEach((engine, index) => {
     const login = githubSignInLogin(engine);
@@ -105,7 +107,7 @@ export type RepositoryWorld = ReturnType<typeof repositoryWorld>;
 
 export async function seedRepositories(input: {
   /** The serving Worker's REPO_CONTENT_KEY: private fixtures are sealed as the ingest Worker would seal them (#263). */
-  bucket: R2BucketLike; contentKey: string; world: RepositoryWorld; control: ControlFetch; webhookSecret: string; userIds: Record<"owner" | "outsider" | "member", string>;
+  bucket: R2BucketLike; contentKey: string; world: RepositoryWorld; control: ControlFetch; webhookSecret: string; userIds: Record<"owner" | "outsider" | "member" | "admin", string>;
   /** The serving Worker's REPO_ACCESS binding: the control Worker's internal endpoints answer only through it (#295). */
   service: ControlFetch;
   /** The serving Worker's IMAGE_PROXY_SECRET: external images are rewritten to the signed proxy (#224), as the ingest Worker does. */
@@ -144,6 +146,16 @@ export async function seedRepositories(input: {
       method: "POST", body: JSON.stringify({ userId: input.userIds[role], githubId: person.id, login: person.login, tokens: github.signIn(person) }),
     });
     if (linked.status !== 204) throw new Error(`Linking ${role} answered ${linked.status}`);
+  }
+  // The visual runs only (#338): the admin's GitHub account answers every request with a 502, so their home renders its
+  // failure state. Functional specs never see it: the admin stays unlinked there.
+  if (repos.visual) {
+    const broken = github.user("e2e-broken", 9520);
+    github.failingUsers.add(broken.id);
+    const linked = await input.service("https://repo-access.internal/v1/accounts/link", {
+      method: "POST", body: JSON.stringify({ userId: input.userIds.admin, githubId: broken.id, login: broken.login, tokens: github.signIn(broken) }),
+    });
+    if (linked.status !== 204) throw new Error(`Linking admin answered ${linked.status}`);
   }
   // POST /membership/added|removed: the member joins or leaves the team, and GitHub's webhook follows.
   // POST /collaborator/added|removed: the owner gains or loses comment-private, and GitHub's webhook follows.

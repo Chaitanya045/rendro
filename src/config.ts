@@ -27,6 +27,8 @@ const envSchema = z.object({
   // sign-in page offers GitHub. AUTH_EMAIL_SIGN_IN=off then makes sign-in GitHub-only (Convex reads it too).
   GITHUB_APP_CLIENT_ID: z.string().optional(),
   AUTH_EMAIL_SIGN_IN: z.enum(["on", "off"]).optional(),
+  // The GitHub App's slug (#338): the home links to its installation page.
+  GITHUB_APP_SLUG: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "GITHUB_APP_SLUG must be the App's URL slug").optional(),
 }).refine(
   (value) => ![value.CONVEX_INTERNAL_SECRET, value.IMAGE_PROXY_SECRET].includes(value.REPO_CAPABILITY_SECRET),
   { path: ["REPO_CAPABILITY_SECRET"], message: "REPO_CAPABILITY_SECRET must not reuse another secret" },
@@ -78,4 +80,10 @@ export interface SignInMethods {
 export function signInMethods(): SignInMethods {
   const github = Boolean(process.env.GITHUB_APP_CLIENT_ID);
   return { github, email: !github || process.env.AUTH_EMAIL_SIGN_IN !== "off" };
+}
+
+/** Where a reader installs the GitHub App on more repositories (#338), or null without its slug. */
+export function githubAppInstallUrl(): string | null {
+  const slug = process.env.GITHUB_APP_SLUG;
+  return slug ? `https://github.com/apps/${encodeURIComponent(slug)}/installations/new` : null;
 }

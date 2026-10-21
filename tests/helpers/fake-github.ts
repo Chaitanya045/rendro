@@ -127,6 +127,8 @@ export class FakeRepo {
   /** Users (by ID) with a direct collaborator grant. */
   readonly collaborators = new Set<number>();
   defaultBranch = "main";
+  /** The last push (epoch ms), as listings report `pushed_at`; null leaves it out (#338). */
+  pushedAt: number | null = null;
 
   constructor(readonly github: FakeGitHub, readonly owner: string, readonly name: string, readonly id: number, public isPrivate: boolean) {}
 
@@ -317,7 +319,8 @@ export class FakeGitHub {
   /** A repository as webhook payloads and the REST API describe it. */
   repoJson(repo: FakeRepo): Record<string, unknown> {
     return { id: repo.id, node_id: `R_${repo.id}`, name: repo.name, full_name: `${repo.owner}/${repo.name}`, private: repo.isPrivate,
-      visibility: repo.isPrivate ? "private" : "public", owner: { login: repo.owner, id: 9000 + repo.id }, default_branch: repo.defaultBranch };
+      visibility: repo.isPrivate ? "private" : "public", owner: { login: repo.owner, id: 9000 + repo.id }, default_branch: repo.defaultBranch,
+      ...(repo.pushedAt === null ? {} : { pushed_at: new Date(repo.pushedAt).toISOString() }) };
   }
 
   /** Rename a repository in place; its old path answers 301, as GitHub's does. */
@@ -548,6 +551,7 @@ export class FakeGitHub {
     const grant = this.accessTokens.get((request.headers.get("authorization") ?? "").slice("Bearer ".length));
     const user = grant && (grant.expiresAt === null || grant.expiresAt > this.now()) ? this.users.get(grant.user) : undefined;
     if (!user) return this.json({ message: "Bad credentials" }, 401);
+    if (this.failingUsers.has(user.id)) return this.json({ message: "Server Error" }, 502);
     if (this.rate.remaining <= 0) return this.withRate(this.json({ message: "API rate limit exceeded for user." }, 403));
     if (url.pathname === "/user") return this.billed(this.json({ id: user.id, login: user.login, name: null, email: null, avatar_url: `https://avatars.github.test/u/${user.id}` }));
     if (url.pathname === "/user/emails") return this.billed(this.json(this.emails.get(user.id) ?? []));
@@ -580,6 +584,8 @@ export class FakeGitHub {
 
   /** The user `GET /login/oauth/authorize` signs in as, and what they decide; `?as=<login>` (a fake-only parameter) picks another. */
   authorizeAs: FakeUser | null = null;
+  /** Users (by ID) every user-token request of theirs answers 502: GitHub failing for them (#338). */
+  readonly failingUsers = new Set<number>();
   authorizeDecision: "approve" | "deny" = "approve";
 
   /**

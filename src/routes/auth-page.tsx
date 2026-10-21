@@ -1,5 +1,6 @@
 import type { User } from "better-auth/types";
 import type { SignInMethods } from "@/config";
+import type { HomeRepositories, HomeRepository } from "@/home-repositories";
 import { authRefreshStyles, authRuntime, authStyles, safeReturnTo, signInErrorMessage, type AuthPage } from "./auth-pages";
 import { CommentRecovery, FaviconLinks, FontHead, ThemeAssets, ThemeButton } from "./head";
 import { InlineScript, InlineStyle, renderHtml, scriptJson } from "./trusted-html";
@@ -13,6 +14,16 @@ interface AuthPageOptions {
   linkInvalid?: boolean;
   /** Sign-in and sign-up (#338): which methods to offer; email alone by default. */
   methods?: SignInMethods;
+  /** The home with GitHub configured (#338): the reader's repositories; without it the home explains /r/ URLs. */
+  home?: HomeView;
+}
+
+export interface HomeView {
+  repositories: HomeRepositories;
+  /** The GitHub App's installation page, when its slug is configured. */
+  installUrl: string | null;
+  /** Back from GitHub's setup URL: the app was installed, or an organization owner was asked to approve it. */
+  notice: "installed" | "requested" | null;
 }
 
 const EMAIL_ONLY: SignInMethods = { github: false, email: true };
@@ -20,16 +31,72 @@ const EMAIL_ONLY: SignInMethods = { github: false, email: true };
 // GitHub's mark (Octicons `mark-github`, MIT).
 const GITHUB_MARK = "M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z";
 
-/** GitHub sign-in (#338): the runtime asks Better Auth for GitHub's authorize URL and follows it. */
-function GitHubSignIn({ label, primary, error }: { label: string; primary: boolean; error: string }) {
+/**
+ * GitHub sign-in (#338): the runtime asks Better Auth for GitHub's authorize URL and follows it. `link` connects
+ * GitHub to the signed-in account instead, and returns to `callback`.
+ */
+function GitHubSignIn({ label, primary, error, link = false, callback }: { label: string; primary: boolean; error: string; link?: boolean; callback?: string }) {
   return (
-    <form id="github-form" class="github-form" novalidate>
+    <form id="github-form" class="github-form" novalidate data-action={link ? "link" : undefined} data-callback={callback}>
       <button class={`button ${primary ? "primary" : "secondary"} github-button`} type="submit">
         <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d={GITHUB_MARK} /></svg>
         <span class="button-label">{label}</span><span class="spinner" aria-hidden="true"></span>
       </button>
       <p class="message error" id="github-error" role="alert">{error}</p>
     </form>
+  );
+}
+
+const updated = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
+
+function RepositoryRow({ repo }: { repo: HomeRepository }) {
+  return (
+    <li>
+      <a class="repo-link" href={`/r/${repo.owner}/${repo.name}`}>
+        <span class="repo-name">{repo.owner}/<strong>{repo.name}</strong></span>
+        <span class="repo-meta">
+          {repo.private && <span class="repo-badge">Private</span>}
+          {repo.pushedAt !== null && <span class="repo-updated">Updated <time datetime={new Date(repo.pushedAt).toISOString()}>{updated.format(repo.pushedAt)}</time></span>}
+        </span>
+      </a>
+    </li>
+  );
+}
+
+/** The reader's repositories (#338), from the permission mirror: the list, its empty state, connecting GitHub, or a failure. */
+function HomeRepositoriesSection({ repositories, installUrl, notice }: HomeView) {
+  const install = installUrl && <a class="home-install" href={installUrl}>Install the app on more repositories</a>;
+  return (
+    <section class="home-repos" aria-labelledby="home-repos-title">
+      <div class="home-repos-head"><h2 id="home-repos-title">Your repositories</h2>{repositories.kind === "list" && repositories.repositories.length > 0 && install}</div>
+      {notice && <p class="home-notice" role="status">{notice === "installed"
+        ? "GitHub updated the app's installation. Your repositories are listed again."
+        : "An organization owner has to approve the installation. Its repositories appear here once they do."}</p>}
+      {repositories.kind === "list" && repositories.repositories.length > 0 && (
+        <>
+          <ul class="repo-list">{repositories.repositories.map((repo) => <RepositoryRow repo={repo} />)}</ul>
+          {repositories.truncated && <p class="hint">Showing the 500 most recently updated repositories.</p>}
+        </>
+      )}
+      {repositories.kind === "list" && repositories.repositories.length === 0 && (
+        <div class="repo-state">
+          <p><strong>No repositories yet.</strong> Install the Rendro GitHub App on a repository you can read, and it appears here.</p>
+          {installUrl && <a class="button primary" href={installUrl}>Install the app</a>}
+        </div>
+      )}
+      {repositories.kind === "unlinked" && (
+        <div class="repo-state">
+          <p>Connect your GitHub account to see the repositories you can read.</p>
+          <GitHubSignIn label="Connect GitHub" primary={false} error="" link callback="/home" />
+        </div>
+      )}
+      {repositories.kind === "unavailable" && (
+        <div class="repo-state" role="alert">
+          <p>We couldn't load your repositories right now. Please try again.</p>
+          <a class="button secondary" href="/home">Try again</a>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -80,7 +147,7 @@ function AccountFooter({ href, label }: { href: string; label: string }) {
   return <div class="account-footer"><a href={href}>{label}</a><form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form></div>;
 }
 
-function PageBody({ page, user, verified = false, token = "", error = "", linkInvalid = false, methods = EMAIL_ONLY }: AuthPageOptions & { page: AuthPage }) {
+function PageBody({ page, user, verified = false, token = "", error = "", linkInvalid = false, methods = EMAIL_ONLY, home }: AuthPageOptions & { page: AuthPage }) {
   if (page === "sign-in") {
     // An OAuth failure (?error=) is GitHub's, so it shows beside the GitHub button once there is one.
     const message = error ? signInErrorMessage(error, methods.email) : "";
@@ -176,7 +243,8 @@ function PageBody({ page, user, verified = false, token = "", error = "", linkIn
     return (
       <>
         <div class="heading"><p class="eyebrow">Signed in</p><h1>Welcome, {user?.name ?? ""}</h1><p>You are signed in as <strong>{user?.email ?? ""}</strong>.</p></div>
-        <section class="security-action home-open" aria-labelledby="home-open-title"><h2 id="home-open-title">Open a repository's documentation</h2><p>Rendro shows the Markdown of a GitHub repository at its own address: <code>{"/r/{owner}/{repo}"}</code>. For example, <code>/r/acme/handbook</code> opens the handbook repository of the acme account.</p></section>
+        {home && <HomeRepositoriesSection {...home} />}
+        {!home && <section class="security-action home-open" aria-labelledby="home-open-title"><h2 id="home-open-title">Open a repository's documentation</h2><p>Rendro shows the Markdown of a GitHub repository at its own address: <code>{"/r/{owner}/{repo}"}</code>. For example, <code>/r/acme/handbook</code> opens the handbook repository of the acme account.</p></section>}
         <AccountFooter href="/account/security" label="Account security" />
       </>
     );
@@ -213,6 +281,7 @@ function PageBody({ page, user, verified = false, token = "", error = "", linkIn
 function AuthDocument({ page, ...options }: AuthPageOptions & { page: AuthPage }) {
   const state = { page, returnTo: safeReturnTo(options.returnTo), token: options.token ?? "" };
   const security = page === "security";
+  const wide = security || options.home !== undefined;
   return (
     <html lang="en">
       <head>
@@ -228,8 +297,8 @@ function AuthDocument({ page, ...options }: AuthPageOptions & { page: AuthPage }
       <body>
         <div class="shell">
           <header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a><ThemeButton /></header>
-          <main class={security ? "main security-main" : "main"}>
-            <section class={security ? "card wide" : "card"} data-page={page}><PageBody page={page} {...options} /></section>
+          <main class={wide ? "main security-main" : "main"}>
+            <section class={wide ? "card wide" : "card"} data-page={page}><PageBody page={page} {...options} /></section>
             {security
               ? <aside class="auth-context"><p class="eyebrow">Account security</p><h2>Keep access deliberate.</h2><p>Manage the verified sign-in methods of this account.</p></aside>
               : <aside class="auth-context"><p class="eyebrow">Documentation</p><h2>Read the docs in your repositories.</h2><p>Rendro renders the Markdown in your GitHub repositories, with comments, for the people who can read them.</p></aside>}
