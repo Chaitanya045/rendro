@@ -2,7 +2,7 @@
 
 Rendro turns the Markdown in a GitHub repository into navigable documentation, with inline comments, for exactly the people who can read that repository. Nothing is uploaded and there is no separate permission model: a GitHub App's webhooks keep a rendered snapshot of each branch, and every page view follows the repository's own access.
 
-> Status: the read path, ingest and permission mirror are built and tested; they are wired to production once the GitHub App exists. Until GitHub sign-in (P1), accounts use email and password.
+> Status: the read path, ingest and permission mirror are built and tested; they are wired to production once the GitHub App exists. GitHub sign-in is built behind configuration (#338); until the App is registered, accounts use email and password.
 
 ## How it works
 

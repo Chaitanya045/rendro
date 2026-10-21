@@ -52,17 +52,18 @@ Worker routes are the only authorization boundary, so no bucket may be reachable
 
 ## Authentication
 
-Better Auth runs inside Convex HTTP actions (`convex/auth.ts`). The Worker proxies `/api/auth/*` to Convex and never stores sessions itself. Email and password is the only sign-in method until GitHub sign-in (P1); Google sign-in was removed (#286).
+Better Auth runs inside Convex HTTP actions (`convex/auth.ts`). The Worker proxies `/api/auth/*` to Convex and never stores sessions itself. Sign-in is by email and password, and by GitHub once the GitHub App is configured ([GitHub sign-in](#github-sign-in-p1), #338); Google sign-in was removed (#286).
 
 ### Sign-in methods
 
 | Method | Behavior |
 |---|---|
 | Email and password | `POST /api/auth/sign-up/email` and `/api/auth/sign-in/email`. Email verification is required before sign-in; verification is sent on sign-up and sign-in. Passwords are 15–128 characters |
+| GitHub | `POST /api/auth/sign-in/social` with `provider: "github"`: the GitHub App's user-to-server OAuth, only when its client is configured ([below](#github-sign-in-p1)) |
 | Password recovery | `/forgot-password` and `/reset-password`; reset tokens expire after one hour and revoke existing sessions. A reset also creates the password of an account that had none |
 | Initial password | `POST /api/auth/set-initial-password` (custom Convex route) lets a signed-in account without a password add one from `/account/security`. Accounts created with the retired Google sign-in have no password; they add one here, or through password recovery |
 
-Sign-up responses do not reveal whether an address is already registered. Better Auth rate limits are stored in the database; sign-in and sign-up endpoints have tighter per-route limits. Verification, reset and existing-account notices are sent through Resend (`RESEND_API_KEY`, `AUTH_EMAIL_FROM`). Delivery retries transient transport failures and provider 5xx/429 with bounded immediate attempts, and logs the outcome when it still fails; the sign-up response stays neutral either way, and users retry through the resend form. Account linking keeps its guards (a verified local email, matching emails, never unlinking the last method) for the next OAuth provider.
+Sign-up responses do not reveal whether an address is already registered. Better Auth rate limits are stored in the database; sign-in and sign-up endpoints have tighter per-route limits. Verification, reset and existing-account notices are sent through Resend (`RESEND_API_KEY`, `AUTH_EMAIL_FROM`). Delivery retries transient transport failures and provider 5xx/429 with bounded immediate attempts, and logs the outcome when it still fails; the sign-up response stays neutral either way, and users retry through the resend form. Account linking keeps its guards (a verified local email, matching emails, never unlinking the last method) for GitHub.
 
 The provider-neutral OAuth error path stays for GitHub sign-in: `/api/auth/error` and any upstream redirect to it are rewritten by the Worker to `/sign-in?error=<code>`, which shows fixed copy for cancellation, an expired or mismatched state, a failed link and unknown codes, never the upstream text.
 
@@ -99,6 +100,35 @@ A signed-in reader lands on `/home` (the root redirects there, and so does a
 sign-in without a destination). It names the account, explains how to open a
 repository at `/r/{owner}/{repo}`, and links to account security and sign-out.
 Until GitHub sign-in can list the reader's repositories, that is all it does.
+
+### GitHub sign-in (P1)
+
+GitHub sign-in (#338) is Better Auth's GitHub provider over the GitHub App's user-to-server OAuth. It is built and tested against the fake GitHub (`tests/helpers/fake-github.ts`) and switched on by configuration alone:
+
+| Setting | Where | Effect |
+|---|---|---|
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Convex | The provider exists only when both are set (`convex/githubAuth.ts`) |
+| `GITHUB_APP_CLIENT_ID` | Serving Worker (var) | The sign-in and sign-up pages offer **Sign in with GitHub**, and the landing page's calls to action read "Sign in with GitHub" |
+| `AUTH_EMAIL_SIGN_IN=off` | Convex and the serving Worker | Sign-in is GitHub-only: Convex turns `/sign-in/email` and `/sign-up/email` off (404), the sign-in page shows GitHub alone and `/sign-up` redirects to `/sign-in`. It counts only once GitHub is configured, so it can never leave an install without a way in. Default on |
+
+Development has no App, so it stays email-only, exactly as before. The App's settings: callback URL `{SITE_URL}/api/auth/callback/github`, user-to-server token expiry on (so tokens come with a refresh token), and the account permission "Email addresses: read".
+
+**The flow.** The page's runtime posts `/api/auth/sign-in/social` and follows the authorize URL it gets back. Better Auth keeps the OAuth state in a verification row with the PKCE verifier, binds it to a signed `state` cookie, and sends GitHub an S256 code challenge. On `/api/auth/callback/github` it checks the state against the cookie (a mismatch or an expired state is `state_mismatch`), exchanges the code with the verifier, and reads `GET /user` and `GET /user/emails`. Only an address GitHub verified counts, the primary one first; an account with none is refused (`email_not_found`). Every failure takes the provider-neutral error path below, with fixed copy (the email-only wording drops out when email sign-in is off). A GitHub session is a remembered (seven-day) session: OAuth sign-in has no "Keep me signed in".
+
+**Linking** (`account.accountLinking`):
+
+| Case | Outcome |
+|---|---|
+| A new GitHub account, no Rendro account with its address | A Rendro account is created, its email verified |
+| A Rendro account with the same address, verified here | GitHub is linked to it (`trustedProviders: ["github"]`, `requireLocalEmailVerified`) |
+| The same address, never verified here | Refused (`account_not_linked`): verify the email first |
+| `link-social` from a signed-in account whose address differs | Refused (`email_doesn't_match`, `allowDifferentEmails: false`) |
+| A GitHub account already linked to another Rendro account | Refused (`account_already_linked_to_different_user`) |
+| Unlinking the last sign-in method | Refused (`allowUnlinkingAll: false`) |
+
+**Tokens never stay in Convex.** Better Auth would store the user's access and refresh token on the account row. `withoutOAuthTokens` wraps the adapter (transactions included) and drops `accessToken`, `refreshToken` and `idToken` from every account write, keeping them for the request alone. The hand-off plugin's `onResponse` then seals the user ID, the GitHub ID and login and the tokens into one header of the callback's response (`x-rendro-github-hand-off`, `shared/github-hand-off.ts`): AES-256-GCM under a key HKDF-derived from `CONVEX_INTERNAL_SECRET` for this purpose alone, expiring after a minute. The serving Worker strips that header from every proxied response, whatever the path, and on the GitHub callback alone opens it and posts it to the control Worker's `/v1/accounts/link` through `REPO_ACCESS` (`src/github-hand-off.ts`), where the tokens are sealed at rest under `GITHUB_TOKEN_KEY` ([Tokens](#tokens)). If that call fails the reader is still signed in, without access to private repositories, and the next GitHub sign-in links again. Without the binding (development today) nothing is forwarded.
+
+**Unlinking GitHub** (`POST /api/auth/unlink-account` with `providerId: "github"`) is the serving Worker's to order: it asks the control Worker to forget the reader's tokens first (`/v1/accounts/unlink`), and forwards the unlink to Convex only once that succeeded; otherwise the answer is a retryable 503 and nothing is unlinked. A GitHub account is therefore never unlinked while its tokens still grant access. A refused unlink (the last method) leaves the tokens forgotten: the next GitHub sign-in restores them.
 
 ### Session lifetime
 
@@ -197,6 +227,7 @@ The Worker checks its own cookie writes with the same rules (`src/middleware/wri
 1. **Header allowlist**: only `accept`, `content-type`, `cookie`, `origin`, `sec-fetch-site`, and `user-agent` are forwarded, plus the signed client-IP headers. `Host`, `Authorization` and `cf-*` headers are excluded.
 2. **Domain stripping**: Convex sets `Domain=convex.site` on cookies. The Worker strips the Domain attribute so cookies bind to the Worker origin.
 3. **Redirect control**: `redirect: "manual"` leaves redirects to the browser; a redirect to Better Auth's error page becomes `/sign-in?error=<code>`.
+   The sealed GitHub hand-off header (`x-rendro-github-hand-off`) is removed from every response; on `/api/auth/callback/github` it is first forwarded to the control Worker, and an unlink of GitHub first drops the tokens there ([GitHub sign-in](#github-sign-in-p1)).
 4. **Sign-out**: `GET /api/auth/sign-out` shows confirmation; a same-origin `POST` calls Convex sign-out (5 s upstream timeout; on a timeout or upstream error the cookies are kept and the page offers to try again, with no automatic retry, see #328), then expires every known auth cookie under the current, legacy and local names (host-only and parent domain; `__Host-` names host-only) and sends `Clear-Site-Data: "cache"` (#242). `"cookies"` is deliberately absent: it clears cookies for the whole registrable domain, not just this origin, and the expirations are already exact per name.
 
 ---
@@ -741,6 +772,8 @@ The repository shell and its document frames load no CSS from a CDN (#89). `src/
 | `REPO_CAPABILITY_SECRET` | Secret (required, ≥32 chars, serving Worker only) | Signs repository capability cookies, asset tickets and the public shared-cache subrequest URLs; rotating it only sends readers back through the permission source once |
 | `REPO_CONTENT_KEY` | Secret (required, ≥32 chars) | Seals private-repository content in R2 (see [Repository content lifecycle](#repository-content-lifecycle-github-pivot-p9b)); the ingest Worker holds the same value |
 | `REPO_CONTENT_KEY_PREVIOUS` | Secret (optional, ≥32 chars) | Only during a [key rotation](#key-rotation): the previous `REPO_CONTENT_KEY`, which still opens content sealed under it |
+| `GITHUB_APP_CLIENT_ID` | Var (optional; production requires it) | The GitHub App's OAuth client ID: set, the pages offer GitHub sign-in ([GitHub sign-in](#github-sign-in-p1)) |
+| `AUTH_EMAIL_SIGN_IN` | Var (optional) | `off` makes sign-in GitHub-only once GitHub is configured; `on` (the default) keeps email sign-in. The same value in Convex |
 | `REPO_SHARED_CACHE_DEBUG` | Var (optional, development only) | Set to `1` to surface the shared-cache subrequest's `CF-Cache-Status`/`Age` as `X-Repo-Shared-Cache` on public frame responses. Never set in production |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
 | `PORT` | Local only; not read by the Worker | Validated in `src/index.ts`; Node.js server port (integer 1–65535, default 3000) |
@@ -755,6 +788,8 @@ The ingest and control Workers' settings are listed with their sections ([ingest
 | `SITE_URL` | Canonical Worker origin; Better Auth base URL and trusted origin (required at runtime) |
 | `RESEND_API_KEY`, `AUTH_EMAIL_FROM` | Verification, reset and existing-account email |
 | `CONVEX_INTERNAL_SECRET` | Verifies signed client IPs and authorizes the Workers' internal functions; same value as the Workers |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The GitHub App's OAuth client: with both, Better Auth's GitHub provider is on ([GitHub sign-in](#github-sign-in-p1)) |
+| `AUTH_EMAIL_SIGN_IN` | `off` turns `/sign-in/email` and `/sign-up/email` off once GitHub is configured; the same value as the serving Worker |
 
 ### CI workflows
 
@@ -1627,8 +1662,8 @@ This section covers who may read which repository (#243, part of epic #214): the
 | Request | Who sends it | What it does |
 |---|---|---|
 | `POST /v1/authorize` (entrypoint `RepoAccessService`) | The serving Worker (`REPO_ACCESS`) | `repoAccessHandler` over the directory: the read path's protocol (#234) |
-| `POST /v1/accounts/link` (entrypoint `RepoAccessService`) | P1's sign-in, through `REPO_ACCESS` | `{ userId, githubId, login, tokens }`: binds a Rendro user to a GitHub account and stores its user-to-server tokens. 204, no body |
-| `POST /v1/accounts/unlink` (entrypoint `RepoAccessService`) | P1's sign-out of GitHub, through `REPO_ACCESS` | `{ userId }`: drops the tokens and mirror and revokes the user |
+| `POST /v1/accounts/link` (entrypoint `RepoAccessService`) | GitHub sign-in (#338), through `REPO_ACCESS` | `{ userId, githubId, login, tokens }`: binds a Rendro user to a GitHub account and stores its user-to-server tokens. 204, no body |
+| `POST /v1/accounts/unlink` (entrypoint `RepoAccessService`) | Unlinking GitHub (#338), through `REPO_ACCESS`, before Convex unlinks the account | `{ userId }`: drops the tokens and mirror and revokes the user |
 | `POST /v1/github/webhook` (default handler) | GitHub | Permission events. 202 applied, 200 duplicate, 204 ignored, 400 malformed, 401 bad signature, 503 not configured |
 
 The internal endpoints are served only by the named entrypoint `RepoAccessService` (#295). A named entrypoint is reachable only through a service binding that names it, never over HTTP, so the serving Worker binds it with `entrypoint = "RepoAccessService"` (the URL's host is a convention, `repo-access.internal`, and checked by nothing). The default handler, which the public route the webhook will need exposes, serves the webhook alone and answers 404 for the internal paths on every host.
@@ -1771,7 +1806,6 @@ A single-repository check that finds the repository accessible during the window
 ### Open points
 
 - One GitHub App has one webhook URL, but push events go to the ingest Worker (#229) and permission events here. P1 decides on a single ingress; the recommendation is the control Worker verifying once and forwarding `push` to the ingest queue.
-- The account hand-over is a service-binding call; if P1's sign-in runs in Convex rather than a Worker, it needs an authenticated public path instead.
 - Asset tickets are only epoch-checked, so a missed webhook can leave an open commit's frame images readable for a ticket's five minutes (the cookie's lifetime since #293).
 - With KV Instant, the serving Worker's `cacheTtl: 60` becomes the dominant term.
 - Commit-pinned frames of public repositories are cached `public, immutable`; a repository made private stays readable from browser caches that already hold a page.
@@ -1981,10 +2015,11 @@ Tests: `tests/repo-comments-convex.test.ts` ("editing repository comments (#287)
 | Comment access as Convex grants written by the read path, deleted by expiry jobs and P5's epochs | Convex cannot ask GitHub or read KV; grants make every comment read and write follow the page view's decision, keep queries free of clock reads, and end with page access |
 | Repository comment anchors re-found in the frame, never re-anchored on the server | Heading slug plus quote with strict uniqueness rules cannot jump to other text, and an untrusted anchor stays data |
 | Private repository content sealed per repository (HKDF from one secret, AES-256-GCM, storage key in the additional data), opened only after authorization | A leaked bucket or cache entry reveals nothing, a blob moved between repositories or objects does not open, and no per-repository key needs storing; the key ID in each envelope lets a key rotate without downtime |
+| GitHub user tokens never stored in Convex: dropped at the adapter, sealed into the OAuth callback's response and forwarded by the serving Worker to the control Worker (#338) | Better Auth must run where sessions live (Convex), but only the control Worker needs the tokens, and only the serving Worker can reach it (service binding). One store of tokens, sealed under a dedicated key, means a Convex data leak exposes no GitHub access |
 | Repository content lifecycle owned by the per-repository ingest coordinator | Wipes (purge, idle expiry, reseal) run in the same serialized chain as ingests, so nothing is written into a half-deleted prefix; its alarm resumes them and expires idle content from a once-a-day last access |
 
 ## Known Limitations
 
-1. Sign-in is email and password only until GitHub sign-in (P1); the signed-in home cannot list a reader's repositories yet.
+1. GitHub sign-in is built but off until the GitHub App is registered (#338); the signed-in home cannot list a reader's repositories yet.
 2. The read path's bindings are not in `wrangler.toml` yet, and the ingest and control Workers exist for development and tests only, until the GitHub App exists ([SETUP.md](SETUP.md#production-readiness-checklist)). Until the owner wires them, every `/r/` URL is a 404.
 3. The first Convex HTTP action after a cold start can add latency.

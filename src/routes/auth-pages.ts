@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
+import { signInMethods } from "@/config";
 import { renderAuthPage } from "./auth-page";
 
 const app = new Hono<{ Variables: { user?: User } }>();
@@ -22,15 +23,17 @@ function signInHref(returnTo: string): string {
   return `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
-export function signInErrorMessage(code: string): string {
+export function signInErrorMessage(code: string, email = true): string {
   switch (code.toLowerCase()) {
     case "access_denied":
-      return "Sign-in was canceled. Try again or sign in with your email and password.";
+      return email ? "Sign-in was canceled. Try again or sign in with your email and password." : "Sign-in was canceled. Try again when you are ready.";
     case "state_mismatch":
     case "state_security_mismatch":
     case "state_not_found":
     case "invalid_state":
       return "Your sign-in attempt expired or could not be verified. Please start again.";
+    case "email_not_found":
+      return "Your GitHub account has no verified email address. Verify one on GitHub, then try again.";
     case "unable_to_link_account":
     case "account_not_linked":
     case "account_already_linked_to_different_user":
@@ -38,7 +41,7 @@ export function signInErrorMessage(code: string): string {
     case "email_not_verified":
       return "We couldn't connect that account. Sign in with your existing method and verify your email first.";
     default:
-      return "We couldn't complete sign-in. Please try again or use your email and password.";
+      return email ? "We couldn't complete sign-in. Please try again or use your email and password." : "We couldn't complete sign-in. Please try again.";
   }
 }
 
@@ -53,6 +56,7 @@ export const authRefreshStyles = `
    hidden, and unfocusable, until the next frame. */
 @media(prefers-reduced-motion:reduce){.security-slot,.security-slot *{transition:none!important}}
 .security-skeleton span{position:relative;display:block;overflow:hidden;height:44px;margin-top:16px;border-radius:8px;background:var(--surface-2)}.security-skeleton span:first-child{width:32%;height:16px;margin-top:0;border-radius:999px}
+.github-form{margin:0}.github-button svg{flex:none}.method-divider{display:flex;align-items:center;gap:12px;margin:22px 0;color:var(--muted);font-size:12px;font-weight:650;letter-spacing:.08em;text-transform:uppercase}.method-divider:before,.method-divider:after{content:"";flex:1;border-top:1px solid var(--border)}.github-form .message{margin:12px 0 0}
 .home-open p{margin:0;color:var(--muted);line-height:1.6}.home-open code{padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--text);font-size:.92em}
 .topbar{height:56px;padding:0 clamp(18px,4vw,44px);position:relative;z-index:2}.button:focus-visible,.reveal:focus-visible,.method-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .button.primary{color:var(--on-accent)}
@@ -109,6 +113,8 @@ export const authRuntime = `
       document.getElementById("success-panel").hidden=false;document.getElementById("success-panel").focus();
     }catch(error){busy(form,false);errorAt("form-error",error);}
   });
+  // GitHub sign-in (#338): Better Auth answers with GitHub's authorize URL and sets the OAuth state cookie.
+  var github=document.getElementById("github-form");if(github){github.addEventListener("submit",async function(event){event.preventDefault();if(github.dataset.inFlight==="true")return;busy(github,true);clearError("github-error");try{var data=await post("/api/auth/sign-in/social",{provider:"github",callbackURL:location.origin+state.returnTo});if(!data||typeof data.url!=="string")throw new Error();location.assign(data.url);}catch(_error){busy(github,false);errorAt("github-error",new Error("GitHub sign-in is unavailable right now. Please try again."));}});window.addEventListener("pageshow",function(event){if(event.persisted)busy(github,false);});}
   var resend=document.getElementById("resend-form");if(resend)resend.addEventListener("submit",async function(event){event.preventDefault();if(resend.dataset.inFlight==="true"||!validate(resend,"form-message"))return;busy(resend,true);var message=document.getElementById("form-message");try{await post("/api/auth/send-verification-email",{email:resend.email.value,callbackURL:location.origin+"/verify-email?verified=1"+(state.returnTo!=="/"?"&returnTo="+encodeURIComponent(state.returnTo):"")});message.className="message";message.textContent="If the address is eligible, a new verification email is on its way.";}catch(error){message.className="message";message.textContent=retryable(error)?"We couldn't send that email. Please try again.":"If the address is eligible, a new verification email is on its way.";}busy(resend,false);});
   if(form&&state.page==="forgot-password")form.addEventListener("submit",async function(event){event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;busy(form,true);var message=document.getElementById("form-message");try{await post("/api/auth/request-password-reset",{email:form.email.value,redirectTo:location.origin+"/reset-password"+(state.returnTo!=="/"?"?returnTo="+encodeURIComponent(state.returnTo):"")});message.textContent="If an account exists for that email, a reset link is on its way.";}catch(error){message.textContent=retryable(error)?"We couldn't send that email. Please try again.":"If an account exists for that email, a reset link is on its way.";}busy(form,false);});
   if(form&&state.page==="reset-password")form.addEventListener("submit",async function(event){event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;clearError("form-error");if(!state.token){errorAt("form-error",new Error("This reset link is missing or invalid."));return;}if(form.password.value!==form.confirmPassword.value){errorAt("form-error",new Error("Passwords do not match."));return;}busy(form,true);try{await post("/api/auth/reset-password",{newPassword:form.password.value,token:state.token});form.hidden=true;document.getElementById("success-panel").hidden=false;document.getElementById("success-panel").focus();}catch(error){busy(form,false);errorAt("form-error",error);}});
@@ -124,13 +130,16 @@ app.get("/sign-in", (c) => {
   const returnTo = safeReturnTo(c.req.query("returnTo"));
   const error = c.req.query("error");
   if (c.get("user") && !error) return c.redirect(returnTo);
-  return c.html(renderAuthPage("sign-in", { returnTo, error }));
+  return c.html(renderAuthPage("sign-in", { returnTo, error, methods: signInMethods() }));
 });
 
 app.get("/sign-up", (c) => {
   const returnTo = safeReturnTo(c.req.query("returnTo"));
   if (c.get("user")) return c.redirect(returnTo);
-  return c.html(renderAuthPage("sign-up", { returnTo }));
+  const methods = signInMethods();
+  // GitHub-only sign-in (AUTH_EMAIL_SIGN_IN=off): GitHub creates the account on first sign-in.
+  if (!methods.email) return c.redirect(returnTo === "/" ? "/sign-in" : signInHref(returnTo));
+  return c.html(renderAuthPage("sign-up", { returnTo, methods }));
 });
 
 app.get("/verify-email", (c) => c.html(renderAuthPage("verify-email", {

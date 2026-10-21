@@ -3,6 +3,7 @@ import { writeAdmission } from "./middleware/write-admission";
 import type { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { proxyAuthRequest, proxyAuthSignOut } from "@/auth-proxy";
+import { repoAccessBinding } from "@/github-hand-off";
 import { logger } from "@/logger";
 import appRoutes from "@/routes/app";
 import authPageRoutes from "@/routes/auth-pages";
@@ -35,7 +36,8 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   // Proxy auth to Convex
   app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
     try {
-      return await proxyAuthRequest(c.req.raw);
+      // The control Worker's binding, where configured, receives GitHub account hand-overs (#338).
+      return await proxyAuthRequest(c.req.raw, repoAccessBinding(c.env));
     } catch {
       logger.error(
         { category: "TransportError" },

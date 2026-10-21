@@ -62,7 +62,7 @@ pnpm exec convex env set RESEND_API_KEY <value>
 pnpm exec convex env set AUTH_EMAIL_FROM "Rendro <auth@your-domain>"
 ```
 
-`SITE_URL` and `AUTH_SECRET` are required by Better Auth (`convex/auth.ts`). Without `RESEND_API_KEY` and `AUTH_EMAIL_FROM`, sign-up, verification and password reset email fail (`convex/authEmails.ts`), and email is the only sign-in method. The full list is in [TECHNICAL.md](TECHNICAL.md#environment-variables-convex).
+`SITE_URL` and `AUTH_SECRET` are required by Better Auth (`convex/auth.ts`). Without `RESEND_API_KEY` and `AUTH_EMAIL_FROM`, sign-up, verification and password reset email fail (`convex/authEmails.ts`), and email is the only sign-in method until the GitHub App's client is configured (`GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`). The full list is in [TECHNICAL.md](TECHNICAL.md#environment-variables-convex).
 
 ### 4. Start the app
 
@@ -111,6 +111,7 @@ Each line has a status:
 
 Wire production in this order. The preflight prints the exact command for each missing item:
 
+0. **Register the GitHub App** (#338) on the account or organization that owns it. Callback URL `https://rendro.app/api/auth/callback/github`; "Expire user authorization tokens" on, so sign-in returns a refresh token; account permission "Email addresses: read"; repository permissions "Contents: read" and "Metadata: read". Generate a client secret. Its client ID goes to Convex and the serving Worker (`GITHUB_APP_CLIENT_ID`), the client secret to Convex and the control Worker (`GITHUB_APP_CLIENT_SECRET`). The serving Worker offers **Sign in with GitHub** as soon as its client ID is set; until then, sign-in stays email-only. `AUTH_EMAIL_SIGN_IN=off`, on the serving Worker and in Convex, later makes it GitHub-only ([TECHNICAL.md](TECHNICAL.md#github-sign-in-p1)).
 1. **Create the resources** once: the ingest R2 bucket, the D1 search database, the revocation-epoch KV namespace (KV Instant, when available to the account, shortens revocation from about a minute to about a second), the ingest queue and its dead-letter queue. Enable Analytics Engine on the account (`wrangler deploy` fails with code 10089 while it is off). Every ID goes into the production section; a placeholder ID is reported as missing.
 2. **Ingest Worker.** Give it the serving Worker's `REPO_CONTENT_KEY` and `IMAGE_PROXY_SECRET` (`wrangler secret put <NAME> --config wrangler.ingest.toml`). Without the content key, private repositories are not ingested. Deploy it first: the other two Workers bind its `RepoIngestCoordinator`, and a binding to a missing Worker fails their deploy.
 3. **Control Worker.** Set its secrets: `GITHUB_TOKEN_KEY` (`openssl rand -hex 32`; dedicated, never reused), the GitHub App's webhook secret and OAuth client, and the Convex URL and internal secret the serving Worker and Convex use. Deploy it with Smart Placement or a location hint near Convex. Route only `/v1/github/webhook` to it publicly and set that URL as the App's webhook URL. Its other endpoints are served only by its `RepoAccessService` entrypoint, which only a service binding can reach. Deploy it before the serving Worker.
@@ -118,7 +119,7 @@ Wire production in this order. The preflight prints the exact command for each m
 5. **Convex.** Set every variable the manifest lists (`pnpm exec convex env set --prod <NAME> <value>`), then `pnpm exec convex deploy`.
 6. **Confirm** with `pnpm preflight:prod --online`: no `MISSING` line.
 
-P1 replaces `GITHUB_DEV_TOKEN` (optional in the manifest) with installation tokens minted per installation, and calls `/v1/accounts/link` through `REPO_ACCESS` at sign-in.
+GitHub sign-in (#338) hands each reader's GitHub account and tokens to the control Worker's `/v1/accounts/link` through `REPO_ACCESS`; without that binding the reader is signed in but private repositories stay closed. `GITHUB_DEV_TOKEN` (optional in the manifest) stays the installation token until installation tokens are minted per installation.
 
 The preflight never prints a value. Offline it reads only the wrangler files. Online it asks the CLIs for names (`wrangler secret list --format json`, `convex env list --prod --names-only`), keeps only the names, discards stderr and reports output it cannot parse by its line count. `tests/production-manifest.test.ts` keeps the manifest honest. It fails when a Worker or Convex reads a binding, secret or env var that the manifest does not list (found statically in each deployable's module graph), or when the manifest lists one the code no longer reads. A new read therefore lands with its manifest entry, and the checklist picks it up.
 

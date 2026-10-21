@@ -79,6 +79,7 @@ const INGEST = "TECHNICAL.md#ingest-worker-and-bindings-development-and-tests-on
 const CONTROL = "TECHNICAL.md#bindings-and-configuration-development-and-tests-only";
 const RUM = "TECHNICAL.md#post-rum";
 const CONVEX = "TECHNICAL.md#environment-variables-convex";
+const GITHUB_SIGN_IN = "TECHNICAL.md#github-sign-in-p1";
 
 const serving: WorkerDeployable = {
   title: "Serving Worker",
@@ -99,6 +100,8 @@ const serving: WorkerDeployable = {
     { kind: "var", name: "NODE_ENV", value: "production", need: "required", purpose: "Production mode: JSON logs at info level", doc: ENV_WORKERS },
     { kind: "var", name: "LOG_LEVEL", need: "optional", purpose: "Pino log level; defaults to info in production", doc: ENV_WORKERS },
     { kind: "var", name: "SITE_URL", need: "optional", purpose: "Canonical origin for write admission and beacons; defaults to the request origin", doc: RUM },
+    { kind: "var", name: "GITHUB_APP_CLIENT_ID", need: "required", purpose: "The GitHub App's OAuth client ID; without it the pages offer email sign-in only", doc: GITHUB_SIGN_IN },
+    { kind: "var", name: "AUTH_EMAIL_SIGN_IN", need: "optional", purpose: "\"off\" makes sign-in GitHub-only (the same value in Convex); default on", doc: GITHUB_SIGN_IN },
     { kind: "var", name: "REPO_SHARED_CACHE_DEBUG", need: "forbidden", purpose: "Development diagnostic that exposes shared-cache headers", doc: ENV_WORKERS },
   ],
   bindings: [
@@ -189,6 +192,9 @@ const convex: ConvexDeployable = {
     { name: "CONVEX_INTERNAL_SECRET", need: "required", purpose: "Verifies the Workers' signed client IPs and internal calls; equals the Workers' value", doc: CONVEX },
     { name: "RESEND_API_KEY", need: "required", purpose: "Verification, reset and existing-account email", doc: CONVEX },
     { name: "AUTH_EMAIL_FROM", need: "required", purpose: "Sender address of the auth email", doc: CONVEX },
+    { name: "GITHUB_APP_CLIENT_ID", need: "required", purpose: "The GitHub App's OAuth client ID; without it and the secret GitHub sign-in is off", doc: GITHUB_SIGN_IN },
+    { name: "GITHUB_APP_CLIENT_SECRET", need: "required", purpose: "The GitHub App's OAuth client secret, for the sign-in code exchange", doc: GITHUB_SIGN_IN },
+    { name: "AUTH_EMAIL_SIGN_IN", need: "optional", purpose: "\"off\" turns email sign-in and sign-up off once GitHub sign-in is configured; default on", doc: GITHUB_SIGN_IN },
   ],
 };
 

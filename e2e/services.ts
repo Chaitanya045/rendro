@@ -30,6 +30,8 @@ async function body(request: IncomingMessage) {
   return Buffer.concat(chunks).toString();
 }
 export type Mail = { to: string; subject: string; text: string };
+/** The HTTPS hosts Convex reaches through the identity fixture: mail, and GitHub's OAuth and API hosts (#338). */
+const TLS_HOSTS = ["api.resend.com", "github.com", "api.github.com"];
 
 /** Outage the Worker's Convex requests meet; see `startFaults`. */
 export type FaultRule = { origin: "convex"; includes: string[]; status: number };
@@ -112,7 +114,8 @@ export async function startImageHost() {
   };
 }
 
-/** No external forwarding: HTTPS mail requests terminate in this fixture.
+/** No external forwarding: HTTPS mail requests terminate in this fixture, and so do GitHub's (#338): Better Auth's
+ * GitHub provider calls github.com and api.github.com, which `github` answers (the harness's fake GitHub).
  * The only forwarded HTTP origins are the harness's own Worker and Convex.
  */
 export async function startIdentityFixtures(directory: string) {
@@ -125,11 +128,12 @@ export async function startIdentityFixtures(directory: string) {
   await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", caKey, "-out", caCert,
     "-days", "1", "-subj", "/CN=Rendro disposable E2E CA", "-addext", "basicConstraints=critical,CA:TRUE"]);
   await run("openssl", ["req", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", csr, "-subj", "/CN=api.resend.com"]);
-  await writeFile(extensions, "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:api.resend.com\n");
+  await writeFile(extensions, `basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=${TLS_HOSTS.map(host => `DNS:${host}`).join(",")}\n`);
   await run("openssl", ["x509", "-req", "-in", csr, "-CA", caCert, "-CAkey", caKey, "-CAcreateserial", "-out", certificate, "-days", "1", "-extfile", extensions]);
   const mail: Mail[] = [];
   const allowedOrigins = new Set<string>();
   const blocked = new Set<string>();
+  const github: { fetch: ((request: Request) => Promise<Response>) | null } = { fetch: null };
   const handle: RequestListener = (req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", `https://${req.headers.host}`);
@@ -137,6 +141,13 @@ export async function startIdentityFixtures(directory: string) {
         mail.push(JSON.parse(await body(req)) as Mail);
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ id: `mail-${mail.length}` }));
+      } else if ((url.origin === "https://github.com" || url.origin === "https://api.github.com") && github.fetch) {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(req.headers)) if (typeof value === "string") headers.set(name, value);
+        const payload = req.method === "GET" || req.method === "HEAD" ? undefined : await body(req);
+        const response = await github.fetch(new Request(url, { method: req.method, headers, body: payload }));
+        res.writeHead(response.status, Object.fromEntries(response.headers));
+        res.end(Buffer.from(await response.arrayBuffer()));
       } else {
         blocked.add(url.origin); res.writeHead(403).end("Blocked fixture destination");
       }
@@ -156,7 +167,7 @@ export async function startIdentityFixtures(directory: string) {
     req.pipe(upstream);
   });
   proxy.server.on("connect", (req, socket, head) => {
-    if (req.url !== "api.resend.com:443") {
+    if (!TLS_HOSTS.some(host => req.url === `${host}:443`)) {
       blocked.add(req.url ?? "unknown"); socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return;
     }
     sockets.add(socket); socket.on("close", () => sockets.delete(socket));
@@ -171,7 +182,7 @@ export async function startIdentityFixtures(directory: string) {
     res.writeHead(404).end("{}");
   });
   return {
-    origin: proxy.origin, certificate: caCert, control: control.origin, allowedOrigins, mail,
+    origin: proxy.origin, certificate: caCert, control: control.origin, allowedOrigins, mail, github,
     async close() {
       for (const socket of sockets) socket.destroy();
       tls.close();

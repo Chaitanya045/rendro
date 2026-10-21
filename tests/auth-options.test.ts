@@ -19,8 +19,9 @@ it("requires runtime auth secrets while permitting offline schema generation", (
   const generated = createAuth({} as never, true);
   expect(generated.options.baseURL).toBe("http://localhost:3000");
   expect(generated.options.secret).toBe("schema-generation-auth_secret");
-  // Email is the only sign-in method until GitHub sign-in (#286): no social provider and no provider credential is needed.
-  expect(generated.options).not.toHaveProperty("socialProviders");
+  // Without the GitHub App's client (#338), email is the only sign-in method: no provider credential is needed.
+  expect(generated.options.socialProviders).toEqual({});
+  expect(generated.options.disabledPaths).toEqual([]);
   vi.stubEnv("SITE_URL", "https://rendro.test");
   expect(() => createAuth({} as never)).toThrow("AUTH_SECRET is required");
   vi.stubEnv("AUTH_SECRET", "synthetic-auth-secret-at-least-32-characters");

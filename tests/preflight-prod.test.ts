@@ -12,7 +12,7 @@ function wired(): Configs {
     "wrangler.toml": {
       name: "rendro",
       secrets: { required: ["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"] },
-      vars: { NODE_ENV: "production", CONVEX_URL: "https://example.convex.cloud" },
+      vars: { NODE_ENV: "production", CONVEX_URL: "https://example.convex.cloud", GITHUB_APP_CLIENT_ID: "Iv1.0000" },
       assets: { directory: "./public", binding: "ASSETS" },
       r2_buckets: [{ binding: "REPO_CONTENT", bucket_name: "rendro-ingest" }],
       kv_namespaces: [{ binding: "REPO_EPOCHS", id: KV }],
@@ -64,7 +64,7 @@ function secretsSet(): Record<string, string[]> {
   };
 }
 
-const CONVEX_LIST = "SITE_URL=https://rendro.app\nAUTH_SECRET=hunter2-auth-value\nCONVEX_INTERNAL_SECRET=hunter2-internal-value\nRESEND_API_KEY=re_hunter2\nAUTH_EMAIL_FROM=Rendro <auth@rendro.app>\n";
+const CONVEX_LIST = "SITE_URL=https://rendro.app\nAUTH_SECRET=hunter2-auth-value\nCONVEX_INTERNAL_SECRET=hunter2-internal-value\nRESEND_API_KEY=re_hunter2\nAUTH_EMAIL_FROM=Rendro <auth@rendro.app>\nGITHUB_APP_CLIENT_ID=Iv1.0000\nGITHUB_APP_CLIENT_SECRET=hunter2-client\n";
 
 function cli(secrets = secretsSet(), convex: CliResult = { code: 0, stdout: CONVEX_LIST }, overrides: Record<string, CliResult> = {}) {
   return vi.fn((_command: string, args: string[]): Promise<CliResult> => {
@@ -115,7 +115,8 @@ describe("production preflight, offline (#333)", () => {
     expect(line("CONVEX_SITE_URL (var-or-secret)")).toMatch(/^\s+optional/);
     expect(line("LOG_LEVEL (var)")).toMatch(/^\s+optional/);
     expect(line("AUTH_SECRET")).toMatch(/^\s+VERIFY/);
-    expect(text).toContain("0 required items missing, 5 to verify (secrets and Convex: run --online with production credentials).");
+    expect(line("AUTH_EMAIL_SIGN_IN", "Convex")).toMatch(/^\s+optional\s+AUTH_EMAIL_SIGN_IN: /);
+    expect(text).toContain("0 required items missing, 7 to verify (secrets and Convex: run --online with production credentials).");
   });
 
   it("checks secrets, vars and development-only settings", async () => {
@@ -286,7 +287,7 @@ describe("production preflight, offline (#333)", () => {
     const configs = mutate((c) => { delete at(c, "wrangler.toml").analytics_engine_datasets; });
     const failing = await run([], configs);
     expect(failing.code).toBe(1);
-    expect(failing.text).toContain("1 required item missing, 5 to verify");
+    expect(failing.text).toContain("1 required item missing, 7 to verify");
     expect((await run(["--report"], configs)).code).toBe(0);
   });
 });
@@ -301,6 +302,8 @@ describe("production preflight, online (#333)", () => {
     expect(line("CONVEX_URL (var-or-secret)")).toContain("ok        CONVEX_URL (var-or-secret): set in [vars]");
     expect(line("REPO_CAPABILITY_SECRET (secret): secret set")).toMatch(/^\s+ok/);
     expect(line("AUTH_SECRET", "Convex")).toContain("ok        AUTH_SECRET: set");
+    // An optional Convex variable (#338) is listed, never missing.
+    expect(line("AUTH_EMAIL_SIGN_IN", "Convex")).toMatch(/^\s+optional\s+AUTH_EMAIL_SIGN_IN: not set/);
     expect(text).not.toMatch(/hunter2|example\.convex/);
     expect(runner.mock.calls).toEqual([
       ["pnpm", ["exec", "wrangler", "secret", "list", "--name", "rendro", "--format", "json"]],

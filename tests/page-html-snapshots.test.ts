@@ -1,6 +1,6 @@
 import type { User } from "better-auth/types";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "@/worker";
 import authPages from "@/routes/auth-pages";
 import { nonceContext } from "@/middleware/html-nonce";
@@ -41,6 +41,7 @@ const page = async (response: Response | Promise<Response>) => {
 describe("server-rendered page snapshots", () => {
   it("landing", async () => {
     await snapshot("landing", nonced(renderLandingPage));
+    await snapshot("landing-github", nonced(() => renderLandingPage({ github: true })));
   });
 
   it("repository shell, with and without comments", async () => {
@@ -104,6 +105,20 @@ describe("server-rendered page snapshots", () => {
     ["reset-password-missing", "/reset-password"],
   ])("auth page %s", async (name, path) => {
     await snapshot(`auth-${name}`, await nonceContext.run(NONCE, () => page(authPages.request(path))));
+  });
+
+  describe("with GitHub sign-in configured (#338)", () => {
+    afterEach(() => vi.unstubAllEnvs());
+    it.each([
+      ["sign-in-github", "/sign-in", "on"],
+      ["sign-in-github-error", "/sign-in?error=state_mismatch&returnTo=%2Fhome", "on"],
+      ["sign-in-github-only", "/sign-in?error=access_denied", "off"],
+      ["sign-up-github", "/sign-up?returnTo=%2Fhome", "on"],
+    ])("auth page %s", async (name, path, email) => {
+      vi.stubEnv("GITHUB_APP_CLIENT_ID", "Iv1.fixture");
+      vi.stubEnv("AUTH_EMAIL_SIGN_IN", email);
+      await snapshot(`auth-${name}`, await nonceContext.run(NONCE, () => page(authPages.request(path))));
+    });
   });
 
   it.each([

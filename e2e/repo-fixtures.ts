@@ -71,6 +71,9 @@ function docs(home: string): Record<string, string> {
   };
 }
 
+/** One GitHub account per engine that signs in with GitHub (#338): `e2e-gh-<engine>`, a collaborator on the private repositories. */
+export const githubSignInLogin = (engine: string) => `e2e-gh-${engine}`;
+
 /** e2e-org with the app installed; the owner is a collaborator on closed-docs, the member reads team-docs through a team. */
 export function repositoryWorld(options: { visual?: boolean } = {}) {
   const github = new FakeGitHub();
@@ -87,6 +90,13 @@ export function repositoryWorld(options: { visual?: boolean } = {}) {
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
   repos.closed.collaborators.add(people.owner.id);
   repos.commentsPrivate.collaborators.add(people.owner.id);
+  // Readers who sign in with GitHub (#338), one per engine so the engines never share an account.
+  ["chromium", "firefox", "webkit"].forEach((engine, index) => {
+    const login = githubSignInLogin(engine);
+    const reader = github.user(login, 9511 + index, [{ email: `${login}@example.test`, primary: true, verified: true }]);
+    repos.closed.collaborators.add(reader.id);
+    repos.commentsPrivate.collaborators.add(reader.id);
+  });
   const team = github.team("e2e-org", "docs-readers", [people.member], [repos.team]);
   return { github, installation, repos, people, team };
 }
@@ -137,7 +147,9 @@ export async function seedRepositories(input: {
   }
   // POST /membership/added|removed: the member joins or leaves the team, and GitHub's webhook follows.
   // POST /collaborator/added|removed: the owner gains or loses comment-private, and GitHub's webhook follows.
-  // POST /commit/comments with { changes }: a commit to comment-docs (null deletes a file), ingested as a push would be.
+  // POST /commit/comments (or /commit/comments-private) with { changes }: a commit to comment-docs (comment-private), null
+  // deleting a file, ingested as a push would be.
+  // GET /github/authorize?as=<login>&decision=approve|deny&<GitHub's query>: GitHub's answer to its authorize page (#338).
   const control = await listen((request, response) => {
     void (async () => {
       const reply = (value: unknown) => {
@@ -147,7 +159,15 @@ export async function seedRepositories(input: {
       const url = request.url ?? "";
       const membership = /^\/membership\/(added|removed)$/.exec(url)?.[1];
       const collaborator = /^\/collaborator\/(added|removed)$/.exec(url)?.[1];
-      if (request.method === "POST" && membership) {
+      if (request.method === "GET" && url.startsWith("/github/authorize?")) {
+        const params = new URL(url, "http://fixture.invalid").searchParams;
+        const user = [...github.users.values()].find(candidate => candidate.login === params.get("as"));
+        const decision = params.get("decision") === "deny" ? "deny" : "approve";
+        params.delete("as");
+        params.delete("decision");
+        if (!user) response.writeHead(404).end();
+        else reply({ location: github.authorize(params, user, decision) });
+      } else if (request.method === "POST" && membership) {
         if (membership === "added") team.members.add(people.member.id);
         else team.members.delete(people.member.id);
         reply({ status: await deliver("membership", { action: membership, member: { id: people.member.id, login: people.member.login }, team: { slug: "docs-readers" } }) });
@@ -155,12 +175,13 @@ export async function seedRepositories(input: {
         if (collaborator === "added") repos.commentsPrivate.collaborators.add(people.owner.id);
         else repos.commentsPrivate.collaborators.delete(people.owner.id);
         reply({ status: await deliver("member", { action: collaborator, member: { id: people.owner.id, login: people.owner.login }, repository: github.repoJson(repos.commentsPrivate) }) });
-      } else if (request.method === "POST" && url === "/commit/comments") {
+      } else if (request.method === "POST" && (url === "/commit/comments" || url === "/commit/comments-private")) {
+        const repo = url === "/commit/comments" ? repos.comments : repos.commentsPrivate;
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(chunk as Buffer);
         const { changes } = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { changes: Record<string, string | null> };
-        const commit = repos.comments.change(changes);
-        const result = await ingestBranch(deps, etags, repos.comments.ref, "main");
+        const commit = repo.change(changes);
+        const result = await ingestBranch(deps, etags, repo.ref, "main");
         if (result.status !== "flipped" && result.status !== "current") throw new Error(`Commit was not ingested (${result.status})`);
         reply({ commit });
       } else {

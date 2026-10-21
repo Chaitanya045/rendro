@@ -325,7 +325,9 @@ async function onlineConvexLines(deps: Dependencies): Promise<Line[]> {
   if (!names) return [{ status: "missing", label: "env var names", detail: `convex env list --prod: ${unparsed(result.stdout)}` }];
   const lines: Line[] = convexDeployable.settings.map((setting) => names.includes(setting.name)
     ? { status: "ok", label: setting.name, detail: "set" }
-    : { status: "missing", label: setting.name, detail: `not set: ${setting.purpose}`, fix: `pnpm exec convex env set --prod ${setting.name} <value>` });
+    : setting.need === "optional"
+      ? { status: "optional", label: setting.name, detail: `not set: ${setting.purpose}` }
+      : { status: "missing", label: setting.name, detail: `not set: ${setting.purpose}`, fix: `pnpm exec convex env set --prod ${setting.name} <value>` });
   const known = new Set([...convexDeployable.settings.map((setting) => setting.name), ...convexDeployable.builtIn]);
   for (const name of names.filter((candidate) => !known.has(candidate))) {
     lines.push({ status: "unused", label: name, detail: "set but not in the manifest (the code does not read it)", fix: `pnpm exec convex env remove --prod ${name}` });
@@ -365,7 +367,9 @@ export async function main(argv: string[], deps: Dependencies): Promise<number> 
   }
   const convex = online
     ? await onlineConvexLines(deps)
-    : convexDeployable.settings.map((setting): Line => ({ status: "verify", label: setting.name, detail: setting.purpose, fix: `pnpm exec convex env set --prod ${setting.name} <value> (checked by --online)` }));
+    : convexDeployable.settings.map((setting): Line => setting.need === "optional"
+      ? { status: "optional", label: setting.name, detail: setting.purpose }
+      : { status: "verify", label: setting.name, detail: setting.purpose, fix: `pnpm exec convex env set --prod ${setting.name} <value> (checked by --online)` });
   print(deps, `${convexDeployable.title} (production deployment): env vars, deployed by \`pnpm exec convex deploy\``, convex);
   all.push(...convex);
   const missing = all.filter((line) => line.status === "missing").length;

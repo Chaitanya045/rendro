@@ -23,6 +23,10 @@ const envSchema = z.object({
   // key stays as REPO_CONTENT_KEY_PREVIOUS until no content sealed under it remains.
   REPO_CONTENT_KEY: z.string().min(32, "REPO_CONTENT_KEY must be at least 32 characters"),
   REPO_CONTENT_KEY_PREVIOUS: z.string().min(32, "REPO_CONTENT_KEY_PREVIOUS must be at least 32 characters").optional(),
+  // GitHub sign-in (#338): the GitHub App's OAuth client ID. Set (with the client secret in Convex), the
+  // sign-in page offers GitHub. AUTH_EMAIL_SIGN_IN=off then makes sign-in GitHub-only (Convex reads it too).
+  GITHUB_APP_CLIENT_ID: z.string().optional(),
+  AUTH_EMAIL_SIGN_IN: z.enum(["on", "off"]).optional(),
 }).refine(
   (value) => ![value.CONVEX_INTERNAL_SECRET, value.IMAGE_PROXY_SECRET].includes(value.REPO_CAPABILITY_SECRET),
   { path: ["REPO_CAPABILITY_SECRET"], message: "REPO_CAPABILITY_SECRET must not reuse another secret" },
@@ -61,3 +65,17 @@ export const IMAGE_PROXY_SECRET = env.IMAGE_PROXY_SECRET;
 export const REPO_CAPABILITY_SECRET = env.REPO_CAPABILITY_SECRET;
 export const REPO_CONTENT_KEY = env.REPO_CONTENT_KEY;
 export const REPO_CONTENT_KEY_PREVIOUS = env.REPO_CONTENT_KEY_PREVIOUS;
+
+export interface SignInMethods {
+  github: boolean;
+  email: boolean;
+}
+
+/**
+ * The sign-in methods the pages offer (#338). GitHub once the App's client is configured; email unless
+ * `AUTH_EMAIL_SIGN_IN=off`, which counts only once GitHub is configured, so it never leaves no way in.
+ */
+export function signInMethods(): SignInMethods {
+  const github = Boolean(process.env.GITHUB_APP_CLIENT_ID);
+  return { github, email: !github || process.env.AUTH_EMAIL_SIGN_IN !== "off" };
+}
