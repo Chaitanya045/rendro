@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "@/worker";
 import authPages from "@/routes/auth-pages";
+import { renderAuthPage } from "@/routes/auth-page";
 import { nonceContext } from "@/middleware/html-nonce";
 import { renderCommentRecoveryLifecycle } from "@/commentor/recovery-session";
 import { renderPreparingPage } from "@/repo-read/preparing";
@@ -118,6 +119,23 @@ describe("server-rendered page snapshots", () => {
       vi.stubEnv("GITHUB_APP_CLIENT_ID", "Iv1.fixture");
       vi.stubEnv("AUTH_EMAIL_SIGN_IN", email);
       await snapshot(`auth-${name}`, await nonceContext.run(NONCE, () => page(authPages.request(path))));
+    });
+  });
+
+  describe("the home's repository list (#338)", () => {
+    const installUrl = "https://github.com/apps/rendro-docs/installations/new";
+    const listed = [
+      { owner: "octo", name: "handbook", private: true, pushedAt: Date.parse("2026-10-01T09:30:00Z") },
+      { owner: "octo", name: "notes", private: false, pushedAt: null },
+    ];
+    it.each([
+      ["home-repositories", { repositories: { kind: "list", repositories: listed, truncated: false }, installUrl, notice: null }],
+      ["home-repositories-installed", { repositories: { kind: "list", repositories: listed, truncated: true }, installUrl, notice: "installed" }],
+      ["home-empty", { repositories: { kind: "list", repositories: [], truncated: false }, installUrl, notice: "requested" }],
+      ["home-unlinked", { repositories: { kind: "unlinked" }, installUrl: null, notice: null }],
+      ["home-unavailable", { repositories: { kind: "unavailable" }, installUrl, notice: null }],
+    ] as const)("%s", async (name, home) => {
+      await snapshot(`auth-${name}`, nonced(() => renderAuthPage("home", { user, home: structuredClone(home) as never })));
     });
   });
 

@@ -62,16 +62,19 @@ test.describe("direct entry", () => {
   });
 });
 
-/** The signed-in home of a fresh user: its account, the `/r/` explainer, Account security and Sign out. */
+/**
+ * The signed-in home of a fresh user: its account, its repositories (the harness has GitHub sign-in and the permission
+ * mirror, #338: an email account has not connected GitHub yet), Account security and Sign out.
+ */
 async function signedInHome(page: Page, cspViolations: string[], viewport: { width: number; height: number }, label: string) {
   await page.setViewportSize(viewport);
   const user = await provision(page, label);
   await page.goto("/home");
   await expect(page.getByRole("heading", { name: /^Welcome, Shell / })).toBeVisible();
   await expect(page.locator("body")).toContainText(user.email);
-  const open = page.getByRole("region", { name: "Open a repository's documentation" });
-  await expect(open).toContainText("/r/{owner}/{repo}");
-  await expect(open).toContainText("/r/acme/handbook");
+  const repositories = page.getByRole("region", { name: "Your repositories" });
+  await expect(repositories).toContainText("Connect your GitHub account to see the repositories you can read.");
+  await expect(repositories.getByRole("button", { name: "Connect GitHub", exact: true })).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   // Each click waits for its navigation. Account security reserves its final layout at first paint (#312), so Back to
@@ -92,11 +95,11 @@ async function signedInHome(page: Page, cspViolations: string[], viewport: { wid
 }
 
 test.describe("signed-in home", () => {
-  test("explains how to open a repository, links to account security and signs out at 1440", async ({ page, cspViolations }, info) => {
+  test("offers to connect GitHub on the home, links to account security and signs out at 1440", async ({ page, cspViolations }, info) => {
     await signedInHome(page, cspViolations, desktop, `home-1440-${info.project.name}`);
   });
 
-  test("explains how to open a repository, links to account security and signs out at 375", async ({ page, cspViolations }, info) => {
+  test("offers to connect GitHub on the home, links to account security and signs out at 375", async ({ page, cspViolations }, info) => {
     await signedInHome(page, cspViolations, mobile, `home-375-${info.project.name}`);
   });
 });

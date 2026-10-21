@@ -97,9 +97,23 @@ Auth templates and their runtime are inline in no-store HTML, outside the
 versioned bundles.
 
 A signed-in reader lands on `/home` (the root redirects there, and so does a
-sign-in without a destination). It names the account, explains how to open a
-repository at `/r/{owner}/{repo}`, and links to account security and sign-out.
-Until GitHub sign-in can list the reader's repositories, that is all it does.
+sign-in without a destination). It names the account and links to account
+security and sign-out. Without GitHub sign-in (or without the permission
+mirror's binding) it explains how to open a repository at `/r/{owner}/{repo}`;
+with both, it lists the reader's repositories ([The home repository list](#the-home-repository-list)).
+
+### The home repository list
+
+With GitHub sign-in configured and the `REPO_ACCESS` binding present, `/home` lists the repositories the reader can read (#338), from the control Worker's mirror (`POST /v1/accounts/repositories`, `src/home-repositories.ts`). A view never calls GitHub: while the reader's mirror is fresh (five minutes) the directory answers from storage, and a stale one is listed again first with conditional requests, as `authorize` does. Only repositories the mirror holds, in a live installation and not removed, are listed. The mirror comes from the reader's own token, so a reader never sees a repository, or a repository's name, they cannot read. The list is most recently pushed first, then by name, at most 500 (with a note when there are more). Each row links to `/r/{owner}/{repo}` and shows `owner/name`, a "Private" badge, and "Updated" with the last push when GitHub's listing reports `pushed_at`.
+
+| State | Shown |
+|---|---|
+| Repositories | The list, and "Install the app on more repositories" (`GITHUB_APP_SLUG`'s installation page) |
+| None | "No repositories yet", with an "Install the app" button |
+| Not linked (no usable GitHub tokens in the mirror: an email account, or a revoked authorization) | "Connect GitHub", which links GitHub to the account (`link-social`) and returns home |
+| The mirror cannot answer (GitHub, the binding, a malformed answer) | A `role="alert"` message and "Try again" (a 503 from the control Worker, never a stale list) |
+
+Back from the App's setup URL, `?github=installed` or `?github=requested` adds a status notice above the list.
 
 ### GitHub sign-in (P1)
 
@@ -773,6 +787,7 @@ The repository shell and its document frames load no CSS from a CDN (#89). `src/
 | `REPO_CONTENT_KEY` | Secret (required, ≥32 chars) | Seals private-repository content in R2 (see [Repository content lifecycle](#repository-content-lifecycle-github-pivot-p9b)); the ingest Worker holds the same value |
 | `REPO_CONTENT_KEY_PREVIOUS` | Secret (optional, ≥32 chars) | Only during a [key rotation](#key-rotation): the previous `REPO_CONTENT_KEY`, which still opens content sealed under it |
 | `GITHUB_APP_CLIENT_ID` | Var (optional; production requires it) | The GitHub App's OAuth client ID: set, the pages offer GitHub sign-in ([GitHub sign-in](#github-sign-in-p1)) |
+| `GITHUB_APP_SLUG` | Var (optional; production requires it) | The GitHub App's URL slug: the home links to `https://github.com/apps/{slug}/installations/new` |
 | `AUTH_EMAIL_SIGN_IN` | Var (optional) | `off` makes sign-in GitHub-only once GitHub is configured; `on` (the default) keeps email sign-in. The same value in Convex |
 | `REPO_SHARED_CACHE_DEBUG` | Var (optional, development only) | Set to `1` to surface the shared-cache subrequest's `CF-Cache-Status`/`Age` as `X-Repo-Shared-Cache` on public frame responses. Never set in production |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
@@ -1664,6 +1679,7 @@ This section covers who may read which repository (#243, part of epic #214): the
 |---|---|---|
 | `POST /v1/authorize` (entrypoint `RepoAccessService`) | The serving Worker (`REPO_ACCESS`) | `repoAccessHandler` over the directory: the read path's protocol (#234) |
 | `POST /v1/accounts/link` (entrypoint `RepoAccessService`) | GitHub sign-in (#338), through `REPO_ACCESS` | `{ userId, githubId, login, tokens }`: binds a Rendro user to a GitHub account and stores its user-to-server tokens. 204, no body |
+| `POST /v1/accounts/repositories` (entrypoint `RepoAccessService`) | The home (#338), through `REPO_ACCESS` | `{ userId }`: `{ linked, repositories: [{ owner, name, private, pushedAt }], truncated }` from the mirror; 503 when a stale mirror cannot be listed |
 | `POST /v1/accounts/refresh` (entrypoint `RepoAccessService`) | The App's setup URL (#338), through `REPO_ACCESS` | `{ userId }`: the user just installed the app; their mirror is listed again on its next use. 204 |
 | `POST /v1/accounts/unlink` (entrypoint `RepoAccessService`) | Unlinking GitHub (#338), through `REPO_ACCESS`, before Convex unlinks the account | `{ userId }`: drops the tokens and mirror and revokes the user |
 | `POST /v1/github/webhook` (default handler) | GitHub | Permission events. 202 applied, 200 duplicate, 204 ignored, 400 malformed, 401 bad signature, 503 not configured |
@@ -2029,6 +2045,6 @@ Tests: `tests/repo-comments-convex.test.ts` ("editing repository comments (#287)
 
 ## Known Limitations
 
-1. GitHub sign-in is built but off until the GitHub App is registered (#338); the signed-in home cannot list a reader's repositories yet.
+1. GitHub sign-in and the home's repository list are built but off until the GitHub App is registered (#338).
 2. The read path's bindings are not in `wrangler.toml` yet, and the ingest and control Workers exist for development and tests only, until the GitHub App exists ([SETUP.md](SETUP.md#production-readiness-checklist)). Until the owner wires them, every `/r/` URL is a 404.
 3. The first Convex HTTP action after a cold start can add latency.

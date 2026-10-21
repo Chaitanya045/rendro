@@ -12165,12 +12165,12 @@
             },
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 1440",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 1440",
               "kind": "e2e"
             },
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 375",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 375",
               "kind": "e2e"
             }
           ]
@@ -12187,12 +12187,12 @@
           "tests": [
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 1440",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 1440",
               "kind": "e2e"
             },
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 375",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 375",
               "kind": "e2e"
             },
             {
@@ -12214,12 +12214,12 @@
           "tests": [
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 1440",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 1440",
               "kind": "e2e"
             },
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 375",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 375",
               "kind": "e2e"
             }
           ]
@@ -12241,12 +12241,12 @@
             },
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 1440",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 1440",
               "kind": "e2e"
             },
             {
               "file": "e2e/shell-entry.spec.ts",
-              "name": "explains how to open a repository, links to account security and signs out at 375",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 375",
               "kind": "e2e"
             }
           ]
@@ -12374,7 +12374,7 @@
             },
             {
               "file": "e2e/github-sign-in.spec.ts",
-              "name": "a reader signs in with GitHub, opens a private repository's docs and comments on them",
+              "name": "a reader signs in with GitHub, finds their private repository on the home, opens its docs and comments on them",
               "kind": "e2e"
             }
           ]
@@ -12696,6 +12696,277 @@
             {
               "file": "tests/github-app-install.test.ts",
               "name": "sends a signed-out installer to sign in first, and still returns home without the binding or when the refresh fails",
+              "kind": "unit"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-169",
+      "title": "The home's repository list (#338)",
+      "area": "Pages and entry",
+      "routes": [
+        "GET /home"
+      ],
+      "sources": [
+        "src/routes/auth-pages.ts",
+        "src/home-repositories.ts",
+        "src/repo-access/directory.ts"
+      ],
+      "roles": [
+        "owner",
+        "member",
+        "outsider"
+      ],
+      "viewports": [
+        320,
+        375,
+        768,
+        1440
+      ],
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "status": "e2e",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New with #338: the home lists the reader's repositories from the permission mirror.",
+      "edges": [
+        {
+          "id": "UI-169-E01",
+          "from": "Signed-in reader with GitHub connected",
+          "trigger": "Open /home",
+          "expected": "Their readable repositories, most recently pushed first, each a link to /r/{owner}/{repo} with a Private badge and the last push; never another reader's private repository",
+          "inventoryRefs": [
+            "UI-169"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "lists exactly what the reader can read, most recently pushed first, with visibility and the last push",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "lists the reader's repositories, each a link to its docs, with the install link",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home-browser.test.ts",
+              "name": "lists the repositories as links, reachable by keyboard with a visible focus ring, each opening its docs",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/github-home-browser.test.ts",
+              "name": "stacks a row on a phone without overflowing the card",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/github-sign-in.spec.ts",
+              "name": "a reader signs in with GitHub, finds their private repository on the home, opens its docs and comments on them",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "home — repositories",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — repositories — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — repositories — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — repositories — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — repositories — 375 — dark",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-169-E02",
+          "from": "Home",
+          "trigger": "Reload within the mirror's lifetime, or after it",
+          "expected": "No GitHub call while the mirror is fresh; a stale mirror is listed again with conditional requests; removed repositories and suspended installations drop out at once",
+          "inventoryRefs": [
+            "UI-169"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "answers from the mirror while it is fresh, and lists again once it is stale",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "drops a removed repository and a suspended installation's repositories at once",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "lists at most the 500 most recently pushed repositories",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "orders repositories without a push by name, after those with one",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-169-E03",
+          "from": "Signed-in reader whose installations list nothing",
+          "trigger": "Open /home",
+          "expected": "No repositories yet, with the Install the app link",
+          "inventoryRefs": [
+            "UI-169"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "explains an empty list, offers to connect GitHub, and offers to try again",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home-browser.test.ts",
+              "name": "offers the install link on an empty list, and a retry that loads the list once the mirror answers",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "home — empty",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — empty — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — empty — 1440 — dark",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-169-E04",
+          "from": "Signed-in reader without GitHub tokens",
+          "trigger": "Open /home, activate Connect GitHub",
+          "expected": "Connect GitHub links GitHub to the account and returns home; a failure shows fixed copy and re-enables the button",
+          "inventoryRefs": [
+            "UI-169"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/github-home-browser.test.ts",
+              "name": "connects GitHub from the home and returns there",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/github-home-browser.test.ts",
+              "name": "explains a failure to connect GitHub with fixed copy and lets the reader try again",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "offers to connect GitHub on the home, links to account security and signs out at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "home — default",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — default — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — default — 1440 — dark",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-169-E05",
+          "from": "Home while the mirror cannot answer",
+          "trigger": "Open /home, then Try again",
+          "expected": "An alert with Try again (a 503, never a stale list); the retry loads the list once the mirror answers",
+          "inventoryRefs": [
+            "UI-169"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "is unlinked without GitHub tokens, and unavailable when GitHub cannot list a stale mirror",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "accepts only a well-formed answer",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home-browser.test.ts",
+              "name": "offers the install link on an empty list, and a retry that loads the list once the mirror answers",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "home — error",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — error — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — home — error — 1440 — dark",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-169-E06",
+          "from": "Back from the App's setup URL",
+          "trigger": "Land on /home?github=installed or requested",
+          "expected": "A status notice above the list; without GitHub sign-in or the mirror, the home explains /r/ URLs as before",
+          "inventoryRefs": [
+            "UI-169"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "shows the notice of the setup URL it came from, and no install link without the App's slug",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/github-home.test.ts",
+              "name": "keeps the home of an install without GitHub sign-in or without the permission mirror",
               "kind": "unit"
             }
           ]

@@ -102,6 +102,7 @@ const serving: WorkerDeployable = {
     { kind: "var", name: "LOG_LEVEL", need: "optional", purpose: "Pino log level; defaults to info in production", doc: ENV_WORKERS },
     { kind: "var", name: "SITE_URL", need: "optional", purpose: "Canonical origin for write admission and beacons; defaults to the request origin", doc: RUM },
     { kind: "var", name: "GITHUB_APP_CLIENT_ID", need: "required", purpose: "The GitHub App's OAuth client ID; without it the pages offer email sign-in only", doc: GITHUB_SIGN_IN },
+    { kind: "var", name: "GITHUB_APP_SLUG", need: "required", purpose: "The GitHub App's URL slug: the home links to its installation page", doc: "TECHNICAL.md#the-home-repository-list" },
     { kind: "var", name: "AUTH_EMAIL_SIGN_IN", need: "optional", purpose: "\"off\" makes sign-in GitHub-only (the same value in Convex); default on", doc: GITHUB_SIGN_IN },
     { kind: "var", name: "REPO_SHARED_CACHE_DEBUG", need: "forbidden", purpose: "Development diagnostic that exposes shared-cache headers", doc: ENV_WORKERS },
   ],

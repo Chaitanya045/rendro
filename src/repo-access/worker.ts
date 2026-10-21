@@ -6,7 +6,8 @@
  *   read path's permission source).
  * - `POST /v1/accounts/link` and `/unlink`: where GitHub sign-in hands over a
  *   user's GitHub identity and tokens (#338), and `/refresh`: the user just
- *   installed the app, so their mirror is listed again on its next use.
+ *   installed the app, so their mirror is listed again on its next use; and
+ *   `/repositories`: what their home lists, from the mirror.
  * - `POST /v1/github/webhook`: GitHub's permission events, verified and
  *   deduplicated like #229's push webhook.
  *
@@ -108,6 +109,15 @@ async function accounts(request: Request, env: ControlWorkerEnv, path: "link" | 
   return new Response(null, { status: response.status === 204 ? 204 : 503 });
 }
 
+/** A reader's home (#338): the repositories their mirror lists. 200 `HomeListing`, 503 when GitHub cannot be asked. */
+async function repositories(request: Request, env: ControlWorkerEnv): Promise<Response> {
+  if (request.method !== "POST") return new Response(null, { status: 405 });
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!validUserId(body?.userId)) return Response.json({ error: "Malformed request" }, { status: 400 });
+  const response = await directory(env).fetch(`${DIRECTORY_URL}/repositories`, { method: "POST", body: JSON.stringify({ userId: body.userId }) });
+  return response.ok ? Response.json(await response.json()) : Response.json({ error: "Unavailable" }, { status: 503 });
+}
+
 async function webhook(request: Request, env: ControlWorkerEnv): Promise<Response> {
   // Without a secret nothing can be verified: answer 503, so GitHub records a failure the reconciler can redeliver.
   if (!env.GITHUB_WEBHOOK_SECRET) return new Response(null, { status: 503 });
@@ -143,6 +153,7 @@ export const RepoAccessService = {
     if (pathname === "/v1/accounts/link") return accounts(request, env, "link");
     if (pathname === "/v1/accounts/unlink") return accounts(request, env, "unlink");
     if (pathname === "/v1/accounts/refresh") return accounts(request, env, "refresh");
+    if (pathname === "/v1/accounts/repositories") return repositories(request, env);
     return new Response(null, { status: 404 });
   },
 };

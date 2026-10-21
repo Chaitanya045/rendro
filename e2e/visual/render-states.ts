@@ -68,9 +68,20 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
       case "not-found":
         return await openAuth(page, visual, family, state, closers, rendered);
       case "home": {
-        await page.context().addCookies(visual.crown.cookies);
+        // The repository list (#338): the visual owner has not connected GitHub; the seeded owner reads two private
+        // repositories, the outsider none, and the admin's GitHub account fails every request (visual runs only).
+        const role = ({ repositories: "owner", empty: "outsider", error: "admin" } as Record<string, "owner" | "outsider" | "admin" | undefined>)[state];
+        if (role) await signInSeeded(page.context(), origin(), visual.seedOwner, role);
+        else await page.context().addCookies(visual.crown.cookies);
         await page.goto("/home");
-        await expect(page.getByRole("heading", { name: "Welcome, Crown Turner", level: 1 })).toBeVisible();
+        const repositories = page.getByRole("region", { name: "Your repositories" });
+        if (state === "default") {
+          await expect(page.getByRole("heading", { name: "Welcome, Crown Turner", level: 1 })).toBeVisible();
+          await expect(repositories.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
+        } else if (state === "repositories") await expect(repositories.getByRole("listitem")).toHaveCount(2);
+        else if (state === "empty") await expect(repositories).toContainText("No repositories yet.");
+        else if (state === "error") await expect(repositories.getByRole("alert")).toBeVisible();
+        else throw new Error(`Unknown visual state home/${state}`);
         return rendered();
       }
       case "viewer": {

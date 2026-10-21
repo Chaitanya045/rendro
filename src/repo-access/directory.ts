@@ -137,6 +137,8 @@ export const PURGE_RETRY_MS = 15 * 60_000;
 export const PURGE_RETRY_MAX_MS = 24 * 60 * 60_000;
 /** Confirmations per alarm. */
 export const PURGE_BATCH = 20;
+/** Repositories a home lists at most, most recently pushed first. */
+export const MAX_HOME_REPOSITORIES = 500;
 
 interface RepoEntry {
   id: number;
@@ -154,6 +156,24 @@ interface RepoEntry {
   confirmedAt?: number;
   /** The ETag of the repository read that set these fields, for a conditional re-read; null once anything else changed them. */
   etag?: string | null;
+  /** The last push a listing reported (epoch ms), for the home (#338). */
+  pushedAt?: number;
+}
+
+/** One repository of a reader's home (#338). */
+export interface HomeRepository {
+  owner: string;
+  name: string;
+  private: boolean;
+  pushedAt: number | null;
+}
+
+export interface HomeListing {
+  /** False when the user has no usable GitHub tokens here: they must sign in with GitHub. */
+  linked: boolean;
+  repositories: HomeRepository[];
+  /** More repositories than `MAX_HOME_REPOSITORIES` were listed. */
+  truncated: boolean;
 }
 
 interface InstallationEntry {
@@ -292,6 +312,12 @@ export class AccessDirectory {
       case "/unlink":
         await this.forget(body.userId as string);
         return new Response(null, { status: 204 });
+      case "/repositories":
+        try {
+          return Response.json(await this.repositories(body.userId as string));
+        } catch {
+          return Response.json({ error: "Unavailable" }, { status: 503 });
+        }
       case "/refresh":
         await this.refreshUser(body.userId as string);
         return new Response(null, { status: 204 });
@@ -597,7 +623,7 @@ export class AccessDirectory {
     for (const repo of listing.repos) {
       const existing = await this.storage.get<RepoEntry>(`repo:${repo.id}`);
       if (existing && existing.seq > start) continue;
-      const fields = { id: repo.id, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, installation: repo.installation, removed: false, check: false };
+      const fields = { id: repo.id, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, installation: repo.installation, removed: false, check: false, pushedAt: repo.pushedAt };
       const same = existing !== undefined && (Object.keys(fields) as Array<keyof typeof fields>).every((key) => existing[key] === fields[key]);
       // The listing is GitHub's word on visibility too; an unchanged record is rewritten only to renew a public one's confirmation.
       if (same && (fields.private || now - (existing.confirmedAt ?? 0) < PUBLIC_CONFIRM_TTL_MS)) continue;
@@ -665,6 +691,41 @@ export class AccessDirectory {
     await this.replaceHoldings(userId, await this.storage.get<Mirror>(`mirror:${userId}`) ?? null, null);
     await this.storage.delete([`mirror:${userId}`]);
     await this.enqueueRevocations([userId]);
+  }
+
+  /**
+   * The repositories a user's home lists (#338): those their mirror holds that a live installation still covers,
+   * most recently pushed first. Answered from storage while the mirror is fresh, so a view costs no GitHub call;
+   * a stale mirror is listed again first (conditional requests), exactly as `authorize` would. A mirror that cannot
+   * be refreshed is unavailable (503), never a stale list.
+   */
+  async repositories(userId: string): Promise<HomeListing> {
+    try {
+      for (let round = 0; round < MAX_ROUNDS; round += 1) {
+        const user = await this.user(userId);
+        if (!user?.tokens) return { linked: false, repositories: [], truncated: false };
+        const mirror = await this.storage.get<Mirror>(`mirror:${userId}`);
+        if (!mirror || mirror.gen !== user.gen || this.deps.now() - mirror.fetchedAt >= MIRROR_TTL_MS) {
+          await this.refreshMirror(userId, user);
+          continue;
+        }
+        const listed: HomeRepository[] = [];
+        for (const id of mirrorIds(mirror)) {
+          const entry = await this.storage.get<RepoEntry>(`repo:${id}`);
+          if (!entry || entry.removed || entry.installation === null) continue;
+          const installation = await this.storage.get<InstallationEntry>(`inst:${entry.installation}`);
+          if (installation?.state !== "active") continue;
+          listed.push({ owner: entry.owner, name: entry.name, private: entry.private, pushedAt: entry.pushedAt ?? null });
+        }
+        const key = (repo: HomeRepository) => `${repo.owner}/${repo.name}`.toLowerCase();
+        listed.sort((a, b) => (b.pushedAt ?? 0) - (a.pushedAt ?? 0) || Number(key(a) > key(b)) - Number(key(a) < key(b)));
+        return { linked: true, repositories: listed.slice(0, MAX_HOME_REPOSITORIES), truncated: listed.length > MAX_HOME_REPOSITORIES };
+      }
+      throw new RepoAccessUnavailable();
+    } catch (error) {
+      if (!(error instanceof RepoAccessUnavailable)) this.deps.log("access.unavailable", { reason: error instanceof GitHubError ? error.kind : "error" });
+      throw new RepoAccessUnavailable();
+    }
   }
 
   /**
