@@ -20,7 +20,9 @@ import { validateClientOperationId, validateCommentAuthor } from "./commentOpera
 import { publicError } from "./publicErrors";
 import { mutation, query } from "./publicFunctions";
 import { publicPaginate } from "./publicPagination";
-import { repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter, validUserId } from "./repoCommentAccess";
+import {
+  isRepoCommentModerator, liveRepoCommentModerator, recordRepoAudit, repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter, validUserId,
+} from "./repoCommentAccess";
 import { repoAnchorValidator } from "./schema";
 import { requireInternalSecret } from "./security";
 import { consumeWriteQuota } from "./writeQuotas";
@@ -105,17 +107,23 @@ function edit(row: { editedAt?: number; editOperationId?: string }) {
   return { editedAt: row.editedAt, editOperationId: row.editOperationId };
 }
 
-/** A reply as `userId` (null: anonymous) sees it: only its author may delete or edit it. */
-async function replyRow(reply: Doc<"repoReplies">, userId: string | null, author: ReturnType<typeof authors>) {
+/**
+ * A reply as `userId` (null: anonymous) sees it: only its author may edit it, and its author or a moderator of the
+ * repository (#259) may delete it. `moderator` is only what the page shows; the mutation decides again.
+ */
+async function replyRow(reply: Doc<"repoReplies">, userId: string | null, moderator: boolean, author: ReturnType<typeof authors>) {
   const own = reply.authorId === userId;
   return {
     _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body, ...edit(reply),
-    canDelete: own, canEdit: own, ...authorDisplay(await author(reply.authorId)),
+    canDelete: own || moderator, canEdit: own, ...authorDisplay(await author(reply.authorId)),
   };
 }
 
-/** One page of a document's live threads, newest first, each with its newest replies, as `userId` (null: anonymous) sees it. */
-async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: string | null, paginationOpts: PageOptions) {
+/**
+ * One page of a document's live threads, newest first, each with its newest replies, as `userId` (null: anonymous)
+ * sees it. A moderator (#259) is offered Archive and Delete on everyone's comments, as its author is on its own.
+ */
+async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: string | null, moderator: boolean, paginationOpts: PageOptions) {
   const threads = await publicPaginate(ctx.db.query("repoThreads")
     .withIndex("by_repo_path", q => q.eq("repoId", repoId).eq("path", path).eq("deletedAt", undefined))
     .order("desc"), { ...paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
@@ -126,12 +134,12 @@ async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: s
       ctx.db.query("repoReplies").withIndex("by_thread", q => q.eq("threadId", thread._id).eq("deletedAt", undefined))
         .order("desc").take(REPO_REPLY_PREVIEW_SIZE + 1),
     ]);
-    const replies = await Promise.all(newest.slice(0, REPO_REPLY_PREVIEW_SIZE).reverse().map(reply => replyRow(reply, userId, author)));
+    const replies = await Promise.all(newest.slice(0, REPO_REPLY_PREVIEW_SIZE).reverse().map(reply => replyRow(reply, userId, moderator, author)));
     const own = thread.authorId === userId;
     return {
       _id: thread._id, _creationTime: thread._creationTime, clientOperationId: thread.clientOperationId,
       repoId: thread.repoId, path: thread.path, blobSha: thread.blobSha, anchor: thread.anchor, body: thread.body, ...edit(thread),
-      resolved: thread.resolved, archived: thread.archived, canDelete: own, canEdit: own,
+      resolved: thread.resolved, archived: thread.archived, canDelete: own || moderator, canEdit: own,
       ...authorDisplay(threadAuthor), replies, repliesHasMore: newest.length > REPO_REPLY_PREVIEW_SIZE,
     };
   }));
@@ -144,7 +152,8 @@ export const listThreads = query({
     if (!validPageSize(args.paginationOpts.numItems, REPO_THREAD_PAGE_SIZE)) publicError("invalid_input");
     const reader = await repoCommentReader(ctx, args.repoId);
     if (!reader || !validRepoPath(args.path)) return emptyPage();
-    return threadPage(ctx, args.repoId, args.path, reader.user?._id ?? null, args.paginationOpts);
+    const userId = reader.user?._id ?? null;
+    return threadPage(ctx, args.repoId, args.path, userId, await isRepoCommentModerator(ctx, args.repoId, userId), args.paginationOpts);
   },
 });
 
@@ -158,16 +167,25 @@ export const listThreads = query({
  * does. A public page is the same for every reader except which threads and replies the reader may delete or edit, so the
  * Worker names its signed-in reader as `viewerId` (#303), and the page is read for them. A private page is always
  * read for the grant's own reader.
+ *
+ * `moderator` (#259) is the control Worker's word, relayed by the Worker, that the page's reader moderates this
+ * repository. The grant may not exist yet (it is recorded in parallel), so the page is told rather than asking for the
+ * grant; it only decides which buttons the page shows, and every mutation decides again from the grant itself.
  */
 export const threadSnapshot = query({
-  args: { internalSecret: v.string(), ...scopeArgs, userId: v.union(v.string(), v.null()), epoch: v.number(), viewerId: v.optional(v.string()) },
+  args: {
+    internalSecret: v.string(), ...scopeArgs, userId: v.union(v.string(), v.null()), epoch: v.number(), viewerId: v.optional(v.string()),
+    moderator: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     requireInternalSecret(args.internalSecret);
-    if (!validRepoPath(args.path) || (args.viewerId !== undefined && (args.userId !== null || !validUserId(args.viewerId)))) {
+    const reader = args.userId ?? args.viewerId ?? null;
+    if (!validRepoPath(args.path) || (args.viewerId !== undefined && (args.userId !== null || !validUserId(args.viewerId)))
+      || (args.moderator === true && reader === null)) {
       publicError("invalid_input");
     }
     if (!await repoCommentSnapshotAllowed(ctx, args.repoId, args.userId, args.epoch)) return emptyPage();
-    return threadPage(ctx, args.repoId, args.path, args.userId ?? args.viewerId ?? null, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
+    return threadPage(ctx, args.repoId, args.path, reader, args.moderator === true, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
   },
 });
 
@@ -183,7 +201,8 @@ export const listReplies = query({
       .order("desc"), { ...args.paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
     const author = authors(ctx);
     const userId = reader.user?._id ?? null;
-    const page = await Promise.all(replies.page.map(reply => replyRow(reply, userId, author)));
+    const moderator = await isRepoCommentModerator(ctx, args.repoId, userId);
+    const page = await Promise.all(replies.page.map(reply => replyRow(reply, userId, moderator, author)));
     return { ...replies, page };
   },
 });
@@ -235,17 +254,40 @@ export const resolve = mutation({
   },
 });
 
-/** Archive hides a thread, so like deletion it is the author's alone. */
+/**
+ * What moderating a comment of another reader needs (#259): the caller's moderator grant, read from storage at this
+ * very call, so a stale page or a forged request gains nothing. Null for the comment's own author, who needs none; a
+ * caller who is neither is `forbidden`.
+ */
+async function moderationOf(ctx: MutationCtx, repoId: number, userId: string, authorId: string, denied: "forbidden" | "not_found" = "forbidden") {
+  if (authorId === userId) return null;
+  const role = await liveRepoCommentModerator(ctx, repoId, userId);
+  if (!role) publicError(denied);
+  return role;
+}
+
+/** The audit event of a moderation action: who, which comment, what, and the role that allowed it, never the text. */
+function auditModeration(ctx: MutationCtx, action: string, userId: string, role: "admin" | "maintain", thread: Doc<"repoThreads">, authorId: string, replyId?: Id<"repoReplies">) {
+  return recordRepoAudit(ctx, userId, action, thread.repoId, {
+    role, threadId: thread._id, ...replyId === undefined ? {} : { replyId }, authorId, path: thread.path,
+  }, Date.now());
+}
+
+/** Archive hides a thread, so like deletion it is its author's, or a moderator's (#259). */
 export const archive = mutation({
   args: { ...scopeArgs, ...operationArgs, threadId: v.string(), archived: v.boolean() },
   handler: async (ctx, args): Promise<boolean> => {
     const { user, thread } = await writableThread(ctx, args);
-    if (thread.authorId !== user._id) publicError("forbidden");
-    if (thread.archived !== args.archived) await ctx.db.patch(thread._id, { archived: args.archived, updatedAt: Date.now() });
+    const role = await moderationOf(ctx, args.repoId, user._id, thread.authorId);
+    if (thread.archived !== args.archived) {
+      await ctx.db.patch(thread._id, { archived: args.archived, updatedAt: Date.now() });
+      if (role) await auditModeration(ctx, args.archived ? "comment.thread_archived" : "comment.thread_unarchived", user._id, role, thread, thread.authorId);
+    }
     return args.archived;
   },
 });
 
+/** Deleting a thread is its author's, or a moderator's (#259). A retry finds the tombstone, and the audit event is written once. */
 export const removeThread = mutation({
   args: { ...scopeArgs, ...operationArgs, threadId: v.string() },
   handler: async (ctx, args): Promise<null> => {
@@ -256,10 +298,11 @@ export const removeThread = mutation({
     const thread = threadId ? await ctx.db.get(threadId) : null;
     // A retried deletion finds its own tombstone; anyone else's or another document's is "not found".
     if (!thread || thread.repoId !== args.repoId || thread.path !== args.path) publicError("not_found");
-    if (thread.authorId !== user._id) publicError(thread.deletedAt === undefined ? "forbidden" : "not_found");
+    const role = await moderationOf(ctx, args.repoId, user._id, thread.authorId, thread.deletedAt === undefined ? "forbidden" : "not_found");
     if (thread.deletedAt !== undefined) return null;
     await ctx.db.patch(thread._id, { deletedAt: Date.now(), body: "" });
     await ctx.scheduler.runAfter(0, internal.repoComments.cleanupDeletedThread, { threadId: thread._id });
+    if (role) await auditModeration(ctx, "comment.thread_deleted", user._id, role, thread, thread.authorId);
     return null;
   },
 });
@@ -352,9 +395,10 @@ export const removeReply = mutation({
     const reply = replyId ? await ctx.db.get(replyId) : null;
     if (!thread || thread.repoId !== args.repoId || thread.path !== args.path || !reply || reply.threadId !== thread._id) publicError("not_found");
     if (thread.deletedAt !== undefined && reply.deletedAt === undefined) publicError("not_found");
-    if (reply.authorId !== user._id) publicError(reply.deletedAt === undefined ? "forbidden" : "not_found");
+    const role = await moderationOf(ctx, args.repoId, user._id, reply.authorId, reply.deletedAt === undefined ? "forbidden" : "not_found");
     if (reply.deletedAt !== undefined) return null;
     await ctx.db.patch(reply._id, { deletedAt: Date.now(), body: "" });
+    if (role) await auditModeration(ctx, "comment.reply_deleted", user._id, role, thread, reply.authorId, reply._id);
     return null;
   },
 });

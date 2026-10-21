@@ -7,7 +7,7 @@ import { ingestBranch } from "../src/ingest/orchestrator/ingest";
 import { envelopeSealer } from "../src/ingest/orchestrator/sealing";
 import { r2Store, type R2BucketLike } from "../src/ingest/orchestrator/store";
 import type { SearchIndex } from "../src/search/index";
-import { FakeGitHub } from "../tests/helpers/fake-github";
+import { FakeGitHub, type FakeRole } from "../tests/helpers/fake-github";
 import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
 import { visualDocs } from "./visual/visual-repo-docs";
 
@@ -159,6 +159,8 @@ export async function seedRepositories(input: {
   }
   // POST /membership/added|removed: the member joins or leaves the team, and GitHub's webhook follows.
   // POST /collaborator/added|removed: the owner gains or loses comment-private, and GitHub's webhook follows.
+  // POST /role/<admin|maintain|write|triage|read|none>: the member's role on comment-docs (#259) changes, and GitHub's
+  // `member` webhook follows. The member holds no role on it otherwise, so a spec that sets one must set `none` after.
   // POST /commit/comments (or /commit/comments-private) with { changes }: a commit to comment-docs (comment-private), null
   // deleting a file, ingested as a push would be.
   // GET /github/authorize?as=<login>&decision=approve|deny&<GitHub's query>: GitHub's answer to its authorize page (#338).
@@ -171,6 +173,7 @@ export async function seedRepositories(input: {
       const url = request.url ?? "";
       const membership = /^\/membership\/(added|removed)$/.exec(url)?.[1];
       const collaborator = /^\/collaborator\/(added|removed)$/.exec(url)?.[1];
+      const role = /^\/role\/(admin|maintain|write|triage|read|none)$/.exec(url)?.[1] as FakeRole | "none" | undefined;
       if (request.method === "GET" && url.startsWith("/github/authorize?")) {
         const params = new URL(url, "http://fixture.invalid").searchParams;
         const user = [...github.users.values()].find(candidate => candidate.login === params.get("as"));
@@ -187,6 +190,15 @@ export async function seedRepositories(input: {
         if (collaborator === "added") repos.commentsPrivate.collaborators.add(people.owner.id);
         else repos.commentsPrivate.collaborators.delete(people.owner.id);
         reply({ status: await deliver("member", { action: collaborator, member: { id: people.owner.id, login: people.owner.login }, repository: github.repoJson(repos.commentsPrivate) }) });
+      } else if (request.method === "POST" && role) {
+        const member = { id: people.member.id, login: people.member.login };
+        if (role === "none") {
+          repos.comments.collaborators.delete(member.id);
+          repos.comments.roles.delete(member.id);
+        } else {
+          repos.comments.roles.set(member.id, role);
+        }
+        reply({ status: await deliver("member", { action: role === "none" ? "removed" : "edited", member, repository: github.repoJson(repos.comments) }) });
       } else if (request.method === "POST" && (url === "/commit/comments" || url === "/commit/comments-private")) {
         const repo = url === "/commit/comments" ? repos.comments : repos.commentsPrivate;
         const chunks: Buffer[] = [];

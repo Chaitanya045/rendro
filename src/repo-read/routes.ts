@@ -25,12 +25,13 @@ import { isCanonicalStorageKey } from "@/storage-boundary";
 import { storageKeyRepoId } from "@/ingest/orchestrator/keys";
 import { ViewerBackendError } from "@/viewer-backend";
 import { viewerScript } from "@/viewer/markup";
-import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
+import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoModeration, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import {
   authorizeRepo, authorizeTicket, CAPABILITY_TTL_SECONDS, mintTicket, TICKET_TTL_SECONDS, type Authorization, type AuthorizeDependencies,
 } from "./authorize";
 import {
-  COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, type CommentGrants, type CommentSnapshots,
+  COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, moderatorDecision, recordModerator,
+  type CommentGrants, type CommentSnapshots, type ModerationSources,
 } from "./comments";
 import { rateLimiter, takeToken, type RateLimiter } from "./admission";
 import { admitFirstView, durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
@@ -85,6 +86,8 @@ interface Services {
   searchLimit: RateLimiter | null;
   /** Where comment grants are recorded (#254). */
   comments: CommentGrants;
+  /** The control Worker's word on who moderates a repository's comments, and the epochs a role is decided under (#259). */
+  moderation: ModerationSources;
   /** Where the shell's first page of a document's threads comes from (#284). */
   commentSnapshots: CommentSnapshots;
   /** Set only where the repository search index is bound (#251); the search URL is otherwise the plain 404. */
@@ -151,6 +154,7 @@ function services(c: Context, timing = new ReadTiming()): Services | null {
     firstViewLimit: rateLimiter(env, "FIRST_VIEW_LIMIT"),
     searchLimit: rateLimiter(env, "SEARCH_LIMIT"),
     comments: convexCommentGrants,
+    moderation: { roles: serviceRepoModeration(access as Fetcher), epochs: kvRevocationEpochs(epochs as KvReader) },
     commentSnapshots: convexCommentSnapshots,
     // The search index is optional: without a D1 binding the search URL is the plain 404.
     search: hasMethods(search, ["prepare", "batch", "exec"]) ? d1SearchIndex(search as SearchD1) : null,
@@ -351,13 +355,13 @@ async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, m
 const MAX_SNAPSHOT_PATH_LENGTH = 1_024;
 
 /**
- * Whom a public repository's first comment page is read for (#303): the signed-in reader, so the page says which threads
- * are theirs to archive or delete. Anyone may read the page, so a reader the session cannot name now (anonymous, or the
- * session check unavailable) gets the anonymous page, as before; a check that fails outright leaves the page out, and the
- * live subscription delivers it. A private page is always its grant's reader's.
+ * The signed-in reader a request's comment access is for (#259, #303). A private grant is its reader's own. For a public
+ * repository it is whoever the session names: the reader the first comment page is read for (so it says which threads
+ * are theirs to archive or delete), and the one whose moderation role is asked. A reader the session cannot name now
+ * (anonymous, or the session check unavailable) is anonymous, as before; a check that fails outright rejects.
  */
-async function snapshotReader(request: Request, grant: RepoGrant, services: Services): Promise<string | null> {
-  if (grant.repo.private) return null;
+async function commentReader(request: Request, grant: RepoGrant, services: Services): Promise<string | null> {
+  if (grant.repo.private) return grant.viewer;
   const viewer = await services.authorize.identity(request);
   return viewer.kind === "user" ? viewer.id : null;
 }
@@ -368,17 +372,27 @@ async function snapshotReader(request: Request, grant: RepoGrant, services: Serv
  * page too (#284), read for this reader in parallel with the grant and returned only when the grant was recorded,
  * so the drawer and highlights need not wait for the Convex socket. A page that could not be read is left out: the
  * live subscription still delivers it.
+ *
+ * A signed-in reader who GitHub says maintains or administers the repository also gets a moderator grant (#259),
+ * recorded once the read grant is, and their page is read as a moderator's. The role comes from the control Worker's
+ * mirror, never from the request; when it cannot be had (an outage, a refusal) the reader simply is not a moderator
+ * for now, and reading and writing are untouched.
  */
 async function commentAccessResponse(c: Context, grant: RepoGrant, services: Services): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
   const path = c.req.query("path");
   const wanted = path !== undefined && path.length <= MAX_SNAPSHOT_PATH_LENGTH && isCanonicalStorageKey(path) ? path : null;
-  const [access, threads] = await Promise.all([
-    commentAccess(services.comments, grant, services.authorize.now()),
-    wanted === null ? null : snapshotReader(c.req.raw, grant, services)
-      .then(reader => commentSnapshot(services.commentSnapshots, grant, wanted, reader)).catch(() => null),
+  const now = services.authorize.now();
+  const reader = commentReader(c.req.raw, grant, services);
+  const decision = reader.then(viewer => moderatorDecision(services.moderation, grant, viewer, now)).catch(() => null);
+  const [access, decided, threads] = await Promise.all([
+    commentAccess(services.comments, grant, now),
+    decision,
+    wanted === null ? null : Promise.all([reader, decision])
+      .then(([viewer, moderator]) => commentSnapshot(services.commentSnapshots, grant, wanted, viewer, moderator !== null)).catch(() => null),
   ]);
   if (!access) return notFound(c, "json");
+  if (decided) await recordModerator(services.comments, grant, decided, now).catch(() => null);
   return c.json({
     repoId: grant.repo.id, private: grant.repo.private, expiresAt: access.expiresAt,
     ...(threads ? { threads: { path: wanted, page: threads.page, isDone: threads.isDone } } : {}),

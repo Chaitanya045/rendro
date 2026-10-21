@@ -16,6 +16,7 @@ import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import { escapeHtml } from "@/routes/html";
 import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import type { ManifestFile } from "@/ingest/orchestrator/snapshot";
+import type { ModerationRole, RepoModerationSource, RevocationEpochs } from "./access";
 import type { RepoGrant } from "./grant";
 
 export interface CommentGrantInput {
@@ -26,16 +27,33 @@ export interface CommentGrantInput {
   expiresAt: number;
 }
 
+/** A reader's moderation role on a repository (#259), as the control Worker's mirror stated it just now. */
+export interface ModeratorGrantInput {
+  repoId: number;
+  userId: string;
+  role: ModerationRole;
+  epoch: number;
+  expiresAt: number;
+}
+
 export interface CommentGrants {
   /** The expiry Convex recorded, or null when it refused (revoked or removed meanwhile). Throws when it could not be asked. */
   record(input: CommentGrantInput): Promise<number | null>;
+  /** The same for a moderator grant (#259). */
+  recordModerator(input: ModeratorGrantInput): Promise<number | null>;
 }
 
-/** Convex's `repoCommentAccess:grant`, called with the internal secret. */
+function grantedExpiry(result: { granted?: unknown; expiresAt?: unknown } | null): number | null {
+  return result?.granted === true && typeof result.expiresAt === "number" ? result.expiresAt : null;
+}
+
+/** Convex's `repoCommentAccess:grant` and `grantModerator`, called with the internal secret. */
 export const convexCommentGrants: CommentGrants = {
   async record(input) {
-    const result = await convexMutationRequired("repoCommentAccess:grant", { ...input }) as { granted?: unknown; expiresAt?: unknown } | null;
-    return result?.granted === true && typeof result.expiresAt === "number" ? result.expiresAt : null;
+    return grantedExpiry(await convexMutationRequired("repoCommentAccess:grant", { ...input }) as { granted?: unknown; expiresAt?: unknown } | null);
+  },
+  async recordModerator(input) {
+    return grantedExpiry(await convexMutationRequired("repoCommentAccess:grantModerator", { ...input }) as { granted?: unknown; expiresAt?: unknown } | null);
   },
 };
 
@@ -44,7 +62,7 @@ export type CommentSnapshot = { page: unknown[]; isDone: boolean };
 
 export interface CommentSnapshots {
   /** The page Convex gives this reader, or null when its answer is malformed. Throws when it could not be asked. */
-  threads(input: { repoId: number; path: string; userId: string | null; epoch: number; viewerId?: string }): Promise<CommentSnapshot | null>;
+  threads(input: { repoId: number; path: string; userId: string | null; epoch: number; viewerId?: string; moderator?: true }): Promise<CommentSnapshot | null>;
 }
 
 /** Convex's `repoComments:threadSnapshot`, called with the internal secret. */
@@ -60,9 +78,11 @@ export const convexCommentSnapshots: CommentSnapshots = {
  * repository). A public page is read for `reader`, the signed-in reader when there is one (#303), so their own threads
  * carry their Archive and Delete from the first paint; a private page is always read for the grant's reader.
  */
-export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string, reader: string | null): Promise<CommentSnapshot | null> {
-  if (grant.repo.private) return snapshots.threads({ repoId: grant.repo.id, path, userId: grant.viewer, epoch: grant.epoch });
-  return snapshots.threads({ repoId: grant.repo.id, path, userId: null, epoch: grant.epoch, ...(reader ? { viewerId: reader } : {}) });
+export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string, reader: string | null, moderator = false): Promise<CommentSnapshot | null> {
+  // The page says which comments the reader may archive or delete: a moderator's role (#259) widens that to everyone's.
+  const role = moderator && (grant.repo.private ? grant.viewer : reader) !== null ? { moderator: true as const } : {};
+  if (grant.repo.private) return snapshots.threads({ repoId: grant.repo.id, path, userId: grant.viewer, epoch: grant.epoch, ...role });
+  return snapshots.threads({ repoId: grant.repo.id, path, userId: null, epoch: grant.epoch, ...(reader ? { viewerId: reader } : {}), ...role });
 }
 
 /** Comment access is decided afresh when the authorization behind it would end sooner (a capability or public memory near
@@ -76,6 +96,7 @@ const recorded = new Map<string, { expiresAt: number; ttl: number }>();
 
 export function clearCommentGrantMemory(): void {
   recorded.clear();
+  moderators.clear();
 }
 
 export type CommentAccess = { expiresAt: number };
@@ -94,6 +115,65 @@ export async function commentAccess(grants: CommentGrants, grant: RepoGrant, now
   recorded.set(key, { expiresAt, ttl: expiresAt - now });
   if (recorded.size > MAX_ENTRIES) recorded.delete(recorded.keys().next().value as string);
   return { expiresAt };
+}
+
+/** What the control Worker said of a reader's moderation role, and what is left to record of it. */
+export interface ModeratorDecision {
+  viewer: string;
+  role: ModerationRole;
+  epoch: number;
+  /** A grant for this very decision is already held in Convex (this isolate recorded it, and it is still fresh). */
+  recorded: boolean;
+}
+
+export interface ModerationSources {
+  roles: RepoModerationSource;
+  epochs: RevocationEpochs;
+}
+
+/** Per isolate: repository, reader and epoch → their role (null: none) and the expiry the decision holds until. */
+const moderators = new Map<string, { role: ModerationRole | null; expiresAt: number; ttl: number }>();
+
+function moderatorKey(repoId: number, viewer: string, epoch: number): string {
+  return `${repoId}\u0000${viewer}\u0000${epoch}`;
+}
+
+function rememberModerator(key: string, entry: { role: ModerationRole | null; expiresAt: number; ttl: number }): void {
+  moderators.delete(key);
+  moderators.set(key, entry);
+  if (moderators.size > MAX_ENTRIES) moderators.delete(moderators.keys().next().value as string);
+}
+
+/**
+ * The moderation role of `viewer`, the signed-in reader of an authorized grant, on its repository (#259), asked of
+ * the control Worker's mirror (never taken from the request). A private grant is the reader's own, at the epoch its
+ * authorization rested on; a public one names no reader, so the reader's own epoch is read before the role is asked,
+ * and Convex refuses what a later revocation already overtook. No role is the answer for no reader, for an
+ * authorization about to end, and for a role the mirror cannot state: it throws only when it could not be asked.
+ */
+export async function moderatorDecision(sources: ModerationSources, grant: RepoGrant, viewer: string | null, now: number): Promise<ModeratorDecision | null> {
+  if (viewer === null || grant.until <= now) return null;
+  const epoch = grant.repo.private ? grant.epoch : await sources.epochs.currentEpoch(viewer);
+  const key = moderatorKey(grant.repo.id, viewer, epoch);
+  const known = moderators.get(key);
+  if (known && known.expiresAt - now > known.ttl * REUSE_FRACTION) return known.role ? { viewer, role: known.role, epoch, recorded: true } : null;
+  const role = await sources.roles.moderationRole(viewer, grant.repo.owner, grant.repo.name);
+  if (role === null) {
+    rememberModerator(key, { role: null, expiresAt: grant.until, ttl: grant.until - now });
+    return null;
+  }
+  return { viewer, role, epoch, recorded: false };
+}
+
+/** Record a decided role in Convex (or reuse the one held). The role, or null when Convex refused it. Throws when it could not be asked. */
+export async function recordModerator(grants: CommentGrants, grant: RepoGrant, decision: ModeratorDecision, now: number): Promise<ModerationRole | null> {
+  if (decision.recorded) return decision.role;
+  const key = moderatorKey(grant.repo.id, decision.viewer, decision.epoch);
+  const expiresAt = await grants.recordModerator({ repoId: grant.repo.id, userId: decision.viewer, role: decision.role, epoch: decision.epoch, expiresAt: grant.until });
+  moderators.delete(key);
+  if (expiresAt === null) return null;
+  rememberModerator(key, { role: decision.role, expiresAt, ttl: expiresAt - now });
+  return decision.role;
 }
 
 /** Script and style sources the widget needs in a repository frame's policy. */

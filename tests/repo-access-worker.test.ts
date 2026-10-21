@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableObjectNamespaceLike } from "../src/ingest/orchestrator/coordinator-client";
-import { serviceRepoPermissions } from "../src/repo-read/access";
+import { RepoAccessUnavailable, serviceRepoModeration, serviceRepoPermissions } from "../src/repo-read/access";
 import * as entry from "../src/repo-access/entry";
 import worker, { directorySource, log, RepoAccessDirectory, RepoAccessService, type ControlWorkerEnv } from "../src/repo-access/worker";
 import { controlWorker } from "../e2e/repo-read-config";
@@ -76,6 +76,36 @@ describe("control Worker", () => {
     expect(await source.authorize("user-1", "octo", "docs")).toBeNull();
   });
 
+  it("answers who may moderate a repository's comments over the service binding, from the same mirror (#259)", async () => {
+    const { env, github } = environment();
+    globalThis.fetch = github.fetch;
+    github.install("octo", { id: 71 });
+    const repo = github.repo("octo", "docs", { id: 801, private: true });
+    const maintainer = github.user("maintainer", 5001);
+    const writer = github.user("writer", 5002);
+    repo.roles.set(maintainer.id, "maintain");
+    repo.roles.set(writer.id, "write");
+    await worker.fetch(webhook(github, "installation", { action: "created", installation: { id: 71, account: { login: "octo" } }, repositories: [github.repoJson(repo)] }), env);
+    for (const [id, user] of [["user-1", maintainer], ["user-2", writer]] as const) {
+      await RepoAccessService.fetch(internal("/v1/accounts/link", { userId: id, githubId: user.id, login: user.login, tokens: github.signIn(user) }), env);
+    }
+    const roles = serviceRepoModeration({ fetch: (request) => RepoAccessService.fetch(request, env) });
+    expect(await roles.moderationRole("user-1", "octo", "docs")).toBe("maintain");
+    expect(await roles.moderationRole("user-2", "octo", "docs")).toBeNull();
+    expect(await roles.moderationRole("user-3", "octo", "docs")).toBeNull();
+    // Malformed requests are refused before the directory hears of them.
+    expect((await RepoAccessService.fetch(internal("/v1/moderation", { viewer: "", owner: "octo", name: "docs" }), env)).status).toBe(400);
+    // An outage, or an answer that is not a role, is unavailable, never a role.
+    const down = serviceRepoModeration({ fetch: (request) => RepoAccessService.fetch(request, { ...env, REPO_ACCESS_DIRECTORY: { idFromName: (name) => name, get: () => ({ fetch: () => Promise.resolve(Response.json({ role: "owner" })) }) } }) });
+    await expect(down.moderationRole("user-1", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    const broken = serviceRepoModeration({ fetch: (request) => RepoAccessService.fetch(request, { ...env, REPO_ACCESS_DIRECTORY: { idFromName: (name) => name, get: () => ({ fetch: () => Promise.resolve(new Response("down", { status: 500 })) }) } }) });
+    await expect(broken.moderationRole("user-1", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    // A directory without its token key is unavailable for everything.
+    const unkeyed = environment({ GITHUB_TOKEN_KEY: undefined });
+    const closed = serviceRepoModeration({ fetch: (request) => RepoAccessService.fetch(request, unkeyed.env) });
+    await expect(closed.moderationRole("user-1", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+  });
+
   it("verifies, deduplicates and plans webhooks", async () => {
     const { env, github, kv } = environment();
     github.install("octo", { id: 71 });
@@ -101,7 +131,7 @@ describe("control Worker", () => {
     const reader = github.user("reader", 5001);
     const link = { userId: "u", githubId: reader.id, login: "reader", tokens: github.signIn(reader) };
     for (const host of ["control.rendro.test", "repo-access.internal"]) {
-      for (const path of ["/v1/authorize", "/v1/accounts/link", "/v1/accounts/unlink"]) {
+      for (const path of ["/v1/authorize", "/v1/moderation", "/v1/accounts/link", "/v1/accounts/unlink"]) {
         const body = JSON.stringify(path === "/v1/accounts/link" ? link : { userId: "u", viewer: null, owner: "octo", name: "docs" });
         expect((await worker.fetch(new Request(`https://${host}${path}`, { method: "POST", body }), env)).status, `${host}${path}`).toBe(404);
       }

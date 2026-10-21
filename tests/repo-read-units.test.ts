@@ -4,8 +4,8 @@ import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/
 import { plaintextSealer, r2Store, type ContentSealer, type ObjectStore } from "@/ingest/orchestrator/store";
 import type { SidebarIndex } from "@/ingest/sidebar";
 import {
-  kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, USER_EPOCH_KEY_PREFIX,
-  VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord,
+  isModerationRole, kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, repoModerationHandler, serviceRepoModeration,
+  serviceRepoPermissions, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord,
 } from "@/repo-read/access";
 import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, type AuthorizeDependencies, type Viewer } from "@/repo-read/authorize";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "@/repo-read/capability";
@@ -158,6 +158,55 @@ describe("repository access protocol", () => {
       expect(response.headers.get("Cache-Control")).toBe("no-store");
     }
     expect(await (await call(JSON.stringify({ viewer: "u", owner: "octo", name: "docs" }))).json()).toEqual({ repo: record });
+  });
+
+  it("asks for a moderation role through the same protocol: a role, none, or unavailable (#259)", async () => {
+    const access = new InMemoryRepoAccess().addRepo(record);
+    access.moderate("u", record.id, "maintain");
+    const client = serviceRepoModeration({ fetch: repoModerationHandler(access) });
+    expect(await client.moderationRole("u", "octo", "DOCS")).toBe("maintain");
+    expect(await client.moderationRole("v", "octo", "docs")).toBeNull();
+    expect(await client.moderationRole("u", "octo", "missing")).toBeNull();
+    access.unavailable = true;
+    await expect(client.moderationRole("u", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    expect([isModerationRole("admin"), isModerationRole("maintain"), isModerationRole("write"), isModerationRole(null), isModerationRole(undefined), isModerationRole("Admin")])
+      .toEqual([true, true, false, false, false, false]);
+  });
+
+  it("treats a malformed, failed or slow role answer as unavailable, never as a role (#259)", async () => {
+    const answers = [
+      () => Response.json({ role: "owner" }),
+      () => Response.json({ role: "write" }),
+      () => Response.json({}),
+      () => Response.json(null),
+      () => new Response("{", { status: 200 }),
+      () => new Response("", { status: 500 }),
+      () => { throw new TypeError("fetch failed"); },
+    ];
+    for (const answer of answers) {
+      await expect(serviceRepoModeration({ fetch: () => Promise.resolve().then(answer) }).moderationRole("u", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    }
+    const slow = serviceRepoModeration({ fetch: request => new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(request.signal.reason as Error))) }, 5);
+    await expect(slow.moderationRole("u", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+  });
+
+  it("validates role requests on the control Worker side (#259)", async () => {
+    const access = new InMemoryRepoAccess().addRepo(record);
+    access.moderate("u", record.id, "admin");
+    const handler = repoModerationHandler(access);
+    const call = (body: string, init: RequestInit = {}, path = "/v1/moderation") =>
+      handler(new Request(`https://repo-access.internal${path}`, { method: "POST", body, ...init }));
+    expect((await call("", { method: "GET", body: undefined })).status).toBe(404);
+    expect((await call("{}", {}, "/v1/authorize")).status).toBe(404);
+    for (const body of ["{", "null", { viewer: null, owner: "octo", name: "docs" }, { viewer: 1, owner: "octo", name: "docs" }, { viewer: "", owner: "octo", name: "docs" },
+      { viewer: "u".repeat(257), owner: "octo", name: "docs" }, { viewer: "u", owner: "o/x", name: "docs" }, { viewer: "u", owner: "octo", name: "" }]) {
+      const response = await call(typeof body === "string" ? body : JSON.stringify(body));
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+    }
+    expect(await (await call(JSON.stringify({ viewer: "u", owner: "octo", name: "docs" }))).json()).toEqual({ role: "admin" });
+    access.unavailable = true;
+    expect((await call(JSON.stringify({ viewer: "u", owner: "octo", name: "docs" }))).status).toBe(503);
   });
 
   it("reads user epochs from KV under epoch:user:<id>: absent is 0, malformed and failures are unavailable", async () => {

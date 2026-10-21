@@ -10,6 +10,7 @@ import { isOwnerLogin, isRepoName } from "@/ingest/orchestrator/messages";
 import { readBytes } from "@/ingest/github/http-source";
 import { RateGovernor, systemClock, type Clock } from "@/ingest/github/rate-governor";
 import { GitHubError } from "@/ingest/github/source";
+import type { ModerationRole } from "@/repo-read/access";
 
 export interface ListedInstallation {
   id: number;
@@ -26,6 +27,8 @@ export interface ListedRepo {
   defaultBranch: string;
   /** When it was last pushed to (epoch ms), where a listing says (#338): the home shows it. */
   pushedAt?: number;
+  /** The listing user's moderation role on it (#259), from the `permissions` of a user-token listing; absent: none. */
+  role?: ModerationRole;
 }
 
 /** A repository as `GET /repos/{owner}/{name}` answered it, with that response's validator. */
@@ -65,12 +68,25 @@ export function parseListedRepo(value: unknown): ListedRepo | null {
   return { id: repo.id, owner: repo.owner.login, name: repo.name, private: repo.private, defaultBranch: repo.default_branch };
 }
 
-/** A listed repository, with its last push when the listing has one. */
+/**
+ * The moderation role a repository's `permissions` object states for the token's user (#259). Only a literal `true`
+ * counts: a missing or malformed object, or any other value, is no role.
+ */
+export function moderationRoleOf(permissions: unknown): ModerationRole | undefined {
+  const flags = permissions as { admin?: unknown; maintain?: unknown } | null;
+  if (flags === null || typeof flags !== "object") return undefined;
+  if (flags.admin === true) return "admin";
+  return flags.maintain === true ? "maintain" : undefined;
+}
+
+/** A listed repository, with its last push and the listing user's role when the listing has them. */
 function parseListing(value: unknown): ListedRepo | null {
   const repo = parseListedRepo(value);
-  const pushed = (value as { pushed_at?: unknown } | null)?.pushed_at;
+  if (!repo) return null;
+  const { pushed_at: pushed, permissions } = value as { pushed_at?: unknown; permissions?: unknown };
   const pushedAt = typeof pushed === "string" ? Date.parse(pushed) : NaN;
-  return repo && Number.isSafeInteger(pushedAt) && pushedAt > 0 ? { ...repo, pushedAt } : repo;
+  const role = moderationRoleOf(permissions);
+  return { ...repo, ...Number.isSafeInteger(pushedAt) && pushedAt > 0 ? { pushedAt } : {}, ...role ? { role } : {} };
 }
 
 function parseInstallation(value: unknown): ListedInstallation | null {
@@ -175,18 +191,25 @@ export class GitHubAccessClient {
     }
   }
 
-  /** `GET /repos/{owner}/{name}/collaborators/{login}/permission`: whether `login` may read, counting teams, org and enterprise grants. */
-  async canRead(budget: string, token: string | null, owner: string, name: string, login: string): Promise<boolean> {
+  /**
+   * `GET /repos/{owner}/{name}/collaborators/{login}/permission`: whether `login` may read, counting teams, org and
+   * enterprise grants, and the moderation role they hold (#259). The role is the response's `role_name` (the legacy
+   * `permission` cannot tell maintain from write); where that is missing, only the legacy `admin` counts. A custom
+   * role is none: GitHub does not say what it was derived from.
+   */
+  async collaboratorAccess(budget: string, token: string | null, owner: string, name: string, login: string): Promise<{ read: boolean; role: ModerationRole | null }> {
     let response: Response;
     try {
       response = await this.send(budget, "permission", `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/collaborators/${encodeURIComponent(login)}/permission`, token, null) as Response;
     } catch (error) {
-      if (error instanceof GitHubError && error.kind === "not-found") return false;
+      if (error instanceof GitHubError && error.kind === "not-found") return { read: false, role: null };
       throw error;
     }
-    const body = await readJson(response) as { permission?: unknown } | null;
+    const body = await readJson(response) as { permission?: unknown; role_name?: unknown } | null;
     if (typeof body?.permission !== "string") throw new GitHubError("invalid-response", "Unexpected permission response", response.status);
-    return READ_ROLES.has(body.permission);
+    const read = READ_ROLES.has(body.permission);
+    const named = typeof body.role_name === "string" ? body.role_name : body.permission;
+    return { read, role: read && (named === "admin" || named === "maintain") ? named : null };
   }
 
   /** One request with bounded retries: a 2xx response, null for 304, or a GitHubError. Redirects are not followed. */

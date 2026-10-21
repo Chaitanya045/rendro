@@ -17,6 +17,7 @@ const endpoints: Endpoint[] = [
   // Repository docs (#254): the read path's internal grant calls, then the comments themselves. Their own
   // cross-repository ID, anchor and access matrix is in tests/repo-comments-convex.test.ts.
   { name: "repoCommentAccess:grant", kind: "mutation", args: () => ({ internalSecret: "wrong", repoId: 1, userId: null, epoch: 0, expiresAt: Date.now() + 1_000 }), ids: [] },
+  { name: "repoCommentAccess:grantModerator", kind: "mutation", args: () => ({ internalSecret: "wrong", repoId: 1, userId: "user", role: "admin", epoch: 0, expiresAt: Date.now() + 1_000 }), ids: [] },
   { name: "repoCommentAccess:revokeUser", kind: "mutation", args: () => ({ internalSecret: "wrong", userId: "user", epoch: 1 }), ids: [] },
   { name: "repoCommentAccess:removeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
   { name: "repoCommentAccess:purgeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },

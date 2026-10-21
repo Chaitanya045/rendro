@@ -1,5 +1,7 @@
 import { vi } from "vitest";
-import { repoAccessHandler, repoKey, RepoAccessUnavailable, type RepoPermissionSource, type RepoRecord, type RevocationEpochs } from "../../src/repo-read/access";
+import {
+  repoAccessHandler, repoKey, RepoAccessUnavailable, repoModerationHandler, type ModerationRole, type RepoModerationSource, type RepoPermissionSource, type RepoRecord, type RevocationEpochs,
+} from "../../src/repo-read/access";
 import { clearAuthorizationMemory } from "../../src/repo-read/authorize";
 import { clearSnapshotMemory, type EdgeCache } from "../../src/repo-read/snapshot";
 import { clearTouches } from "../../src/repo-read/first-view";
@@ -13,12 +15,16 @@ import { sessionCache } from "../../src/session-cache";
  * epochs (#234). It is what P5's GitHub-backed implementation replaces:
  * repositories by name, readers per repository, an epoch per user.
  */
-export class InMemoryRepoAccess implements RepoPermissionSource, RevocationEpochs {
+export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationSource, RevocationEpochs {
   readonly repos = new Map<string, RepoRecord>();
   readonly readers = new Map<number, Set<string>>();
   readonly epochs = new Map<string, number>();
-  readonly calls = { authorize: [] as Array<{ viewer: string | null; repo: string }>, epochs: 0 };
+  /** The moderation role (#259) a user holds on a repository, by `<repo id>:<user id>`. */
+  readonly moderators = new Map<string, ModerationRole>();
+  readonly calls = { authorize: [] as Array<{ viewer: string | null; repo: string }>, moderation: [] as Array<{ viewer: string; repo: string }>, epochs: 0 };
   unavailable = false;
+  /** Only the role lookup fails (#259); reading is untouched. */
+  moderationUnavailable = false;
   epochsUnavailable = false;
 
   addRepo(repo: RepoRecord, readers: string[] = []): this {
@@ -29,6 +35,17 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RevocationEpoch
 
   grant(userId: string, repoId: number): void {
     this.readers.get(repoId)?.add(userId);
+  }
+
+  moderate(userId: string, repoId: number, role: ModerationRole): void {
+    this.moderators.set(`${repoId}:${userId}`, role);
+  }
+
+  moderationRole(viewer: string, owner: string, name: string): Promise<ModerationRole | null> {
+    this.calls.moderation.push({ viewer, repo: repoKey(owner, name) });
+    if (this.unavailable || this.moderationUnavailable) return Promise.reject(new RepoAccessUnavailable());
+    const repo = this.repos.get(repoKey(owner, name));
+    return Promise.resolve(repo ? this.moderators.get(`${repo.id}:${viewer}`) ?? null : null);
   }
 
   /** Removes access, then bumps the epoch: the order P5 must keep. */
@@ -146,7 +163,7 @@ export async function repoReadFixture() {
   for (const repo of Object.values(repos)) await ingestBranch(ingest.deps, cache, repo.ref, "main");
   const pending: Array<Promise<unknown>> = [];
   const kv = epochKv(access);
-  const env = { REPO_CONTENT: ingest.bucket, REPO_EPOCHS: kv, REPO_ACCESS: { fetch: repoAccessHandler(access) }, REPO_INGEST: null as FakeIngestCoordinator["namespace"] | null,
+  const env = { REPO_CONTENT: ingest.bucket, REPO_EPOCHS: kv, REPO_ACCESS: { fetch: (request: Request) => new URL(request.url).pathname === "/v1/moderation" ? repoModerationHandler(access)(request) : repoAccessHandler(access)(request) }, REPO_INGEST: null as FakeIngestCoordinator["namespace"] | null,
     FIRST_VIEW_LIMIT: null as FakeRateLimiter | null, SEARCH_LIMIT: null as FakeRateLimiter | null };
   const ctx = { waitUntil: (promise: Promise<unknown>) => void pending.push(promise), passThroughOnException() {}, props: {} };
   const settle = async () => {

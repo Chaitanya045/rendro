@@ -47,6 +47,8 @@ async function control<T>(path: string, body?: unknown): Promise<T> {
 
 /** Push a commit to comment-docs (null deletes a file); it is ingested before this returns. */
 export const commit = async (changes: Record<string, string | null>) => (await control<{ commit: string }>("/commit/comments", { changes })).commit;
+/** The member's GitHub role on comment-docs (#259), applied through GitHub's `member` webhook; `none` removes it. */
+export const memberRole = async (role: "admin" | "maintain" | "write" | "triage" | "read" | "none") => (await control<{ status: number }>(`/role/${role}`)).status;
 export const collaborator = async (action: "added" | "removed") => (await control<{ status: number }>(`/collaborator/${action}`)).status;
 
 /** A page of comment-docs of its own (a new path per call), so a journey starts with no comments even on a retry. */
