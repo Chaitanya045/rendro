@@ -4,6 +4,8 @@
  *
  * - `POST /v1/authorize`: `repoAccessHandler` over the access directory (the
  *   read path's permission source).
+ * - `POST /v1/moderation`: the role that lets a reader moderate a repository's
+ *   comments (#259), from the same mirror.
  * - `POST /v1/accounts/link` and `/unlink`: where GitHub sign-in hands over a
  *   user's GitHub identity and tokens (#338), and `/refresh`: the user just
  *   installed the app, so their mirror is listed again on its next use; and
@@ -23,7 +25,7 @@ import { appJwtSigner, gitHubAppCredentials, mintedInstallationTokens } from "@/
 import { staticTokenProvider } from "@/ingest/github/token";
 import type { DurableObjectNamespaceLike } from "@/ingest/orchestrator/coordinator-client";
 import { isOwnerLogin } from "@/ingest/orchestrator/messages";
-import { parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, type RepoPermissionSource } from "@/repo-read/access";
+import { parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, isModerationRole, repoModerationHandler, type RepoModerationSource, type RepoPermissionSource } from "@/repo-read/access";
 import { convexCommentSink } from "./comments";
 import { coordinatorContentPurge } from "./content";
 import { AccessDirectory, type DirectoryLog, type DirectoryState, type EpochStore } from "./directory";
@@ -81,6 +83,18 @@ export function directorySource(env: ControlWorkerEnv): RepoPermissionSource {
       const repo = response.ok ? parseRepoRecord((await response.json() as { repo?: unknown }).repo) : null;
       if (!repo) throw new RepoAccessUnavailable();
       return repo;
+    },
+  };
+}
+
+/** The role lookup the comment grants call (#259), answered by the directory object. */
+export function directoryModeration(env: ControlWorkerEnv): RepoModerationSource {
+  return {
+    async moderationRole(viewer, owner, name) {
+      const response = await directory(env).fetch(`${DIRECTORY_URL}/moderation`, { method: "POST", body: JSON.stringify({ viewer, owner, name }) });
+      const role = response.ok ? (await response.json() as { role?: unknown }).role : undefined;
+      if (role !== null && !isModerationRole(role)) throw new RepoAccessUnavailable();
+      return role;
     },
   };
 }
@@ -150,6 +164,7 @@ export const RepoAccessService = {
   async fetch(request: Request, env: ControlWorkerEnv): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === "/v1/authorize") return repoAccessHandler(directorySource(env))(request);
+    if (pathname === "/v1/moderation") return repoModerationHandler(directoryModeration(env))(request);
     if (pathname === "/v1/accounts/link") return accounts(request, env, "link");
     if (pathname === "/v1/accounts/unlink") return accounts(request, env, "unlink");
     if (pathname === "/v1/accounts/refresh") return accounts(request, env, "refresh");

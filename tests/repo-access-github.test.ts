@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RateGovernor } from "../src/ingest/github/rate-governor";
 import type { GitHubError } from "../src/ingest/github/source";
-import { GitHubAccessClient, parseListedRepo } from "../src/repo-access/github";
+import { GitHubAccessClient, moderationRoleOf, parseListedRepo } from "../src/repo-access/github";
 import { FakeGitHub } from "./helpers/fake-github";
 import { FakeClock } from "./helpers/ingest-fixture";
 
@@ -50,6 +50,25 @@ describe("GitHubAccessClient", () => {
     expect(client.requests).toBe(5);
   });
 
+  it("lists the reader's moderation role per repository, and a role change is a changed page (#259)", async () => {
+    const { github, client, token, reader } = setup();
+    const docs = github.repo("octo", "docs", { id: 801, private: true });
+    const guide = github.repo("octo", "guide", { id: 802, private: true });
+    const plain = github.repo("octo", "plain", { id: 803, private: true });
+    docs.roles.set(reader.id, "admin");
+    guide.roles.set(reader.id, "maintain");
+    plain.roles.set(reader.id, "write");
+    const listed = await client.installationRepositories("user:u", token, 71, 1, null);
+    expect(listed?.items.map((repo) => [repo.name, repo.role])).toEqual([["docs", "admin"], ["guide", "maintain"], ["plain", undefined]]);
+    // Demoted: the same request is not a 304, so a conditional refresh cannot keep a role GitHub withdrew.
+    guide.roles.set(reader.id, "triage");
+    const demoted = await client.installationRepositories("user:u", token, 71, 1, listed?.etag ?? null);
+    expect(demoted?.items.map((repo) => repo.role)).toEqual(["admin", undefined, undefined]);
+    // A listing that states nothing about permissions gives no role.
+    github.fault(/\/user\/installations\/71\/repositories/, () => Response.json({ repositories: [{ id: 801, name: "docs", owner: { login: "octo" }, private: true, default_branch: "main", pushed_at: "2026-01-01T00:00:00Z" }] }));
+    expect((await client.installationRepositories("user:u", token, 71, 1, null))?.items).toEqual([{ id: 801, owner: "octo", name: "docs", private: true, defaultBranch: "main", pushedAt: Date.parse("2026-01-01T00:00:00Z") }]);
+  });
+
   it("reads an installation the user cannot reach, or a suspended one, as empty", async () => {
     const { github, client, token } = setup();
     github.install("other", { id: 73, suspended: true });
@@ -89,14 +108,46 @@ describe("GitHubAccessClient", () => {
   it("asks whether one person may read one repository", async () => {
     const { github, client, reader } = setup();
     const repo = github.repo("octo", "docs", { id: 801, private: true });
-    expect(await client.canRead("installation:71", github.token, "octo", "docs", "reader")).toBe(false);
+    const access = (login = "reader") => client.collaboratorAccess("installation:71", github.token, "octo", "docs", login);
+    expect(await access()).toEqual({ read: false, role: null });
     repo.collaborators.add(reader.id);
-    expect(await client.canRead("installation:71", github.token, "octo", "docs", "reader")).toBe(true);
-    expect(await client.canRead("installation:71", github.token, "octo", "docs", "nobody")).toBe(false);
+    expect(await access()).toEqual({ read: true, role: null });
+    expect(await access("nobody")).toEqual({ read: false, role: null });
     github.fault(/permission$/, () => Response.json({ role_name: "read" }));
-    expect((await failure(client.canRead("installation:71", github.token, "octo", "docs", "reader"))).kind).toBe("invalid-response");
+    expect((await failure(access())).kind).toBe("invalid-response");
     github.fault(/permission$/, () => new Response("down", { status: 500 }), 2);
-    expect((await failure(client.canRead("installation:71", github.token, "octo", "docs", "reader"))).kind).toBe("server");
+    expect((await failure(access())).kind).toBe("server");
+  });
+
+  it("reads the moderation role from role_name, and only an admin from the legacy permission when it is missing (#259)", async () => {
+    const { github, client, reader } = setup();
+    const repo = github.repo("octo", "docs", { id: 801, private: true });
+    const access = () => client.collaboratorAccess("installation:71", github.token, "octo", "docs", "reader");
+    // The legacy `permission` calls maintain "write" and triage "read": role_name tells them apart.
+    for (const [role, expected] of [["read", null], ["triage", null], ["write", null], ["maintain", "maintain"], ["admin", "admin"]] as const) {
+      repo.roles.set(reader.id, role);
+      expect(await access()).toEqual({ read: true, role: expected });
+    }
+    // No role_name (older servers): the legacy admin is an admin, write cannot be told from maintain, so it is none.
+    github.fault(/permission$/, () => Response.json({ permission: "admin" }));
+    expect(await access()).toEqual({ read: true, role: "admin" });
+    github.fault(/permission$/, () => Response.json({ permission: "write" }));
+    expect(await access()).toEqual({ read: true, role: null });
+    // A custom role is none, and so is any role GitHub names for someone who cannot read at all.
+    github.fault(/permission$/, () => Response.json({ permission: "read", role_name: "docs-editor" }));
+    expect(await access()).toEqual({ read: true, role: null });
+    github.fault(/permission$/, () => Response.json({ permission: "none", role_name: "admin" }));
+    expect(await access()).toEqual({ read: false, role: null });
+    github.fault(/permission$/, () => Response.json({ permission: "admin", role_name: 7 }));
+    expect(await access()).toEqual({ read: true, role: "admin" });
+  });
+
+  it("takes a listed repository's role only from a literal true (#259)", () => {
+    expect(moderationRoleOf({ admin: true, maintain: true, push: true, triage: true, pull: true })).toBe("admin");
+    expect(moderationRoleOf({ admin: false, maintain: true })).toBe("maintain");
+    for (const unknown of [undefined, null, "admin", 1, [], {}, { admin: "true", maintain: 1 }, { admin: false, maintain: false, push: true }]) {
+      expect(moderationRoleOf(unknown)).toBeUndefined();
+    }
   });
 
   it("classifies failures and rejects unexpected shapes", async () => {
@@ -159,7 +210,7 @@ describe("GitHubAccessClient", () => {
     github.fault(/\/user\/installations/, () => Response.json({ message: "You have exceeded a secondary rate limit" }, { status: 403 }));
     expect((await failure(client.userInstallations("user:c", token, 1, null))).kind).toBe("rate-limited");
     github.fault(/\/repos\//, () => Response.json({ message: "Resource not accessible by integration" }, { status: 403 }));
-    expect((await failure(client.canRead("installation:9", github.token, "octo", "docs", "reader"))).kind).toBe("forbidden");
+    expect((await failure(client.collaboratorAccess("installation:9", github.token, "octo", "docs", "reader"))).kind).toBe("forbidden");
     github.fault(/\/repos\//, () => new Response("", { status: 429 }));
     expect((await failure(client.repository("installation:8", github.token, "octo", "docs"))).kind).toBe("rate-limited");
   });

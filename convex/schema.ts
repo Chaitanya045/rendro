@@ -12,6 +12,9 @@ export const repoAnchorValidator = v.object({
   suffix: v.string(),
   offset: v.number(),
 });
+// The roles that may moderate repository comments (#259): GitHub's admin and maintain, as the control Worker's
+// permission mirror states them. Write, triage and read are not roles here: they never moderate.
+export const moderationRoleValidator = v.union(v.literal("admin"), v.literal("maintain"));
 export default defineSchema({
   admissionBuckets: defineTable({ name: v.string(), key: v.string(), expiresAt: v.number() })
     .index("by_bucket", ["name", "key"])
@@ -26,6 +29,20 @@ export default defineSchema({
     repoId: v.number(),
     // null: the repository was public when granted; anyone may read.
     userId: v.union(v.string(), v.null()),
+    epoch: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_repo_user", ["repoId", "userId"])
+    .index("by_user", ["userId"]),
+
+  // A reader's moderation role on a repository (#259): they may archive and delete other readers' comments there. It
+  // is recorded by the serving Worker only, from the control Worker's answer, and ends exactly as a read grant does:
+  // at its expiry, on the user's revocation epoch, or when the repository is removed. A public repository's readers
+  // hold no per-user grant, so this is its own table rather than a field of a read grant.
+  repoCommentModerators: defineTable({
+    repoId: v.number(),
+    userId: v.string(),
+    role: moderationRoleValidator,
     epoch: v.number(),
     expiresAt: v.number(),
   })

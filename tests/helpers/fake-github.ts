@@ -57,10 +57,16 @@ export interface FakeInstallation {
   repositories: "all" | Set<number>;
 }
 
+/** GitHub's repository roles, weakest first (custom roles are modelled by `role_name` alone). */
+export type FakeRole = "read" | "triage" | "write" | "maintain" | "admin";
+const ROLE_ORDER: FakeRole[] = ["read", "triage", "write", "maintain", "admin"];
+
 export interface FakeTeam {
   org: string;
   members: Set<number>;
   repos: Set<number>;
+  /** The role the team grants on its repositories (default read). */
+  role: FakeRole;
 }
 
 export interface FakeUserTokens {
@@ -126,6 +132,8 @@ export class FakeRepo {
 
   /** Users (by ID) with a direct collaborator grant. */
   readonly collaborators = new Set<number>();
+  /** The role of a direct collaborator (default read), and of a non-collaborator granted one anyway. */
+  readonly roles = new Map<number, FakeRole>();
   defaultBranch = "main";
   /** The last push (epoch ms), as listings report `pushed_at`; null leaves it out (#338). */
   pushedAt: number | null = null;
@@ -263,8 +271,8 @@ export class FakeGitHub {
     return installation;
   }
 
-  team(org: string, slug: string, members: FakeUser[] = [], repos: FakeRepo[] = []): FakeTeam {
-    const team = { org, members: new Set(members.map((member) => member.id)), repos: new Set(repos.map((repo) => repo.id)) };
+  team(org: string, slug: string, members: FakeUser[] = [], repos: FakeRepo[] = [], role: FakeRole = "read"): FakeTeam {
+    const team = { org, members: new Set(members.map((member) => member.id)), repos: new Set(repos.map((repo) => repo.id)), role };
     this.teams.set(`${org}/${slug}`, team);
     return team;
   }
@@ -275,11 +283,37 @@ export class FakeGitHub {
       && (installation.repositories === "all" || installation.repositories.has(repo.id)));
   }
 
+  /**
+   * The user's strongest role on the repository, as GitHub resolves it across the owner account, a direct grant, teams
+   * and the organization base permission; null when none of them gives explicit access (#259).
+   */
+  roleOf(user: FakeUser, repo: FakeRepo): FakeRole | null {
+    if (repo.owner.toLowerCase() === user.login.toLowerCase()) return "admin";
+    const granted: FakeRole[] = [];
+    if (repo.collaborators.has(user.id) || repo.roles.has(user.id)) granted.push(repo.roles.get(user.id) ?? "read");
+    for (const team of this.teams.values()) if (team.members.has(user.id) && team.repos.has(repo.id)) granted.push(team.role);
+    if (this.orgReaders.get(repo.owner)?.has(user.id)) granted.push("read");
+    return granted.sort((a, b) => ROLE_ORDER.indexOf(b) - ROLE_ORDER.indexOf(a))[0] ?? null;
+  }
+
   /** Explicit read access, as /user/installations/{id}/repositories counts it: owner, collaborator, team or organization base permission. */
   canRead(user: FakeUser, repo: FakeRepo): boolean {
-    return repo.owner.toLowerCase() === user.login.toLowerCase() || repo.collaborators.has(user.id)
-      || [...this.teams.values()].some((team) => team.members.has(user.id) && team.repos.has(repo.id))
-      || (this.orgReaders.get(repo.owner)?.has(user.id) ?? false);
+    return this.roleOf(user, repo) !== null;
+  }
+
+  /** The `permissions` object GitHub shows a user on a repository. */
+  permissionsOf(user: FakeUser, repo: FakeRepo) {
+    const rank = ROLE_ORDER.indexOf(this.roleOf(user, repo) ?? "read");
+    const atLeast = (role: FakeRole) => rank >= ROLE_ORDER.indexOf(role);
+    return { admin: atLeast("admin"), maintain: atLeast("maintain"), push: atLeast("write"), triage: atLeast("triage"), pull: true };
+  }
+
+  /** Answers of `permission` endpoints: the legacy four-value `permission` and the precise `role_name`. */
+  collaboratorPermission(user: FakeUser, repo: FakeRepo) {
+    const role = this.roleOf(user, repo);
+    if (role === null) return { permission: "none", role_name: "none", user: { login: user.login, id: user.id } };
+    const legacy = role === "admin" ? "admin" : role === "maintain" || role === "write" ? "write" : "read";
+    return { permission: legacy, role_name: role, user: { login: user.login, id: user.id } };
   }
 
   /** What the OAuth callback hands over at sign-in: a user-to-server token pair. */
@@ -486,8 +520,7 @@ export class FakeGitHub {
       const login = decodeURIComponent(rest.slice("collaborators/".length, -"/permission".length));
       const user = [...this.users.values()].find((candidate) => candidate.login.toLowerCase() === login.toLowerCase());
       if (!user) return this.billed(this.json({ message: "Not Found" }, 404));
-      const permission = this.canRead(user, repo) ? "read" : "none";
-      return this.billed(this.json({ permission, role_name: permission, user: { login: user.login, id: user.id } }));
+      return this.billed(this.json(this.collaboratorPermission(user, repo)));
     }
     if (endpoint === "ref") {
       if (repo.branches.size === 0) return this.billed(this.json({ message: "Git Repository is empty." }, 409));
@@ -579,7 +612,7 @@ export class FakeGitHub {
     if (!installation || !reachable(installation)) return this.billed(this.json({ message: "Not Found" }, 404));
     if (installation.suspended) return this.billed(this.json({ message: "This installation has been suspended" }, 403));
     const repos = [...this.repos.values()].filter((repo) => this.installationOf(repo) === installation && this.canRead(user, repo)).sort((a, b) => a.id - b.id);
-    return listed("repositories", repos.map((repo) => ({ ...this.repoJson(repo), permissions: { admin: false, maintain: false, push: false, triage: false, pull: true } })), { repository_selection: installation.repositories === "all" ? "all" : "selected" });
+    return listed("repositories", repos.map((repo) => ({ ...this.repoJson(repo), permissions: this.permissionsOf(user, repo) })), { repository_selection: installation.repositories === "all" ? "all" : "selected" });
   }
 
   /** The user `GET /login/oauth/authorize` signs in as, and what they decide; `?as=<login>` (a fake-only parameter) picks another. */

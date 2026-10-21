@@ -41,6 +41,25 @@ export interface RepoPermissionSource {
   authorize(viewer: string | null, owner: string, name: string): Promise<RepoRecord | null>;
 }
 
+/**
+ * The roles that let a reader moderate the comments of a repository (#259): GitHub's admin and maintain. Write,
+ * triage and read are not here: those readers keep resolving threads, and archive or delete only their own.
+ */
+export type ModerationRole = "admin" | "maintain";
+
+export function isModerationRole(value: unknown): value is ModerationRole {
+  return value === "admin" || value === "maintain";
+}
+
+export interface RepoModerationSource {
+  /**
+   * The role that lets `viewer` (a Rendro user ID) moderate the comments of `owner/name`, or null: no role, no
+   * access, or an unknown repository, never told apart. Throws `RepoAccessUnavailable` when the answer is unknown.
+   * It is decided by the same mirror as `RepoPermissionSource.authorize`, so it is as current and ends with it.
+   */
+  moderationRole(viewer: string, owner: string, name: string): Promise<ModerationRole | null>;
+}
+
 export interface RevocationEpochs {
   /**
    * The user's revocation epoch. A capability minted at an older epoch is no
@@ -120,6 +139,36 @@ export function serviceRepoPermissions(binding: Fetcher, timeoutMs = ACCESS_TIME
   };
 }
 
+const MODERATION_URL = "https://repo-access.internal/v1/moderation";
+
+/**
+ * Client for the control Worker's role lookup. POST `/v1/moderation` with `{ viewer, owner, name }`; 200
+ * `{ role }` (a role or null), anything else (including a malformed answer, or none within five seconds) is
+ * unavailable. The serving Worker asks only for a reader it has already authorized, to say what they may
+ * moderate; the role is never taken from the request.
+ */
+export function serviceRepoModeration(binding: Fetcher, timeoutMs = ACCESS_TIMEOUT_MS): RepoModerationSource {
+  return {
+    async moderationRole(viewer, owner, name) {
+      let body: unknown;
+      try {
+        const response = await binding.fetch(new Request(MODERATION_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ viewer, owner, name }),
+          signal: AbortSignal.timeout(timeoutMs),
+        }));
+        body = response.ok ? await response.json() : null;
+      } catch {
+        throw new RepoAccessUnavailable();
+      }
+      const role = (body as { role?: unknown } | null)?.role;
+      if (role !== null && !isModerationRole(role)) throw new RepoAccessUnavailable();
+      return role;
+    },
+  };
+}
+
 function json(status: number, value: unknown): Response {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
@@ -140,6 +189,21 @@ export function repoAccessHandler(source: RepoPermissionSource): (request: Reque
     try {
       const repo = await source.authorize(viewer, input.owner, input.name);
       return repo ? json(200, { repo }) : json(404, {});
+    } catch {
+      return json(503, { error: "Unavailable" });
+    }
+  };
+}
+
+/** The control Worker's side of the role lookup: P5 passes its directory. */
+export function repoModerationHandler(source: RepoModerationSource): (request: Request) => Promise<Response> {
+  return async (request) => {
+    if (request.method !== "POST" || new URL(request.url).pathname !== "/v1/moderation") return json(404, {});
+    const input = await request.json().catch(() => null) as { viewer?: unknown; owner?: unknown; name?: unknown } | null;
+    if (typeof input?.viewer !== "string" || input.viewer.length === 0 || input.viewer.length > 256
+      || !isOwnerLogin(input.owner) || !isRepoName(input.name)) return json(400, { error: "Malformed request" });
+    try {
+      return json(200, { role: await source.moderationRole(input.viewer, input.owner, input.name) });
     } catch {
       return json(503, { error: "Unavailable" });
     }

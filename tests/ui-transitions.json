@@ -4888,12 +4888,17 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-moderation.spec.ts",
+              "name": "a maintainer archives and deletes other readers' comments; a writer cannot, and a demotion takes the rights back at once",
+              "kind": "e2e"
             }
           ]
         },
@@ -4927,7 +4932,7 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/repo-comments-convex.test.ts",
@@ -4938,6 +4943,11 @@
               "file": "tests/convex-public-errors.test.ts",
               "name": "returns safe codes for permissions, validation and author changes",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comment-moderation.spec.ts",
+              "name": "a maintainer archives and deletes other readers' comments; a writer cannot, and a demotion takes the rights back at once",
+              "kind": "e2e"
             }
           ]
         },

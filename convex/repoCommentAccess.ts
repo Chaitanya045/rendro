@@ -17,6 +17,12 @@
  *
  * A grant with `userId: null` records that the repository was public: anyone may
  * read, and signed-in users may write. Otherwise only that user may.
+ *
+ * A moderator grant (#259) records that the control Worker's permission mirror gave this reader GitHub's admin or
+ * maintain role on the repository: they may then archive and delete other readers' comments. It is recorded by the
+ * same trusted caller, refused on the same stale epochs and removed repositories, scheduled to expire like a read
+ * grant, and deleted with every other grant of the user on a revocation epoch, so it ends no later than a read
+ * grant does. It grants nothing alone: a moderator acts through a live write grant too.
  */
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -25,6 +31,7 @@ import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/
 import { authComponent } from "./auth";
 import { publicError } from "./publicErrors";
 import { mutation } from "./publicFunctions";
+import { moderationRoleValidator } from "./schema";
 import { requireInternalSecret } from "./security";
 
 /** No grant outlives the five-minute capability cookie it rests on, whatever the caller asks. */
@@ -64,6 +71,10 @@ function repoRow(ctx: Ctx, repoId: number): Promise<Doc<"repoCommentRepos"> | nu
 
 function grantRow(ctx: Ctx, repoId: number, userId: string | null): Promise<Doc<"repoCommentGrants"> | null> {
   return ctx.db.query("repoCommentGrants").withIndex("by_repo_user", q => q.eq("repoId", repoId).eq("userId", userId)).unique();
+}
+
+function moderatorRow(ctx: Ctx, repoId: number, userId: string): Promise<Doc<"repoCommentModerators"> | null> {
+  return ctx.db.query("repoCommentModerators").withIndex("by_repo_user", q => q.eq("repoId", repoId).eq("userId", userId)).unique();
 }
 
 function epochRow(ctx: Ctx, userId: string): Promise<Doc<"repoCommentEpochs"> | null> {
@@ -112,6 +123,24 @@ export async function repoCommentSnapshotAllowed(ctx: Ctx, repoId: number, userI
   const repo = await repoRow(ctx, repoId);
   if (!repo || repo.removedAt !== undefined) return false;
   return userId === null || ((await epochRow(ctx, userId))?.epoch ?? 0) <= epoch;
+}
+
+/**
+ * Whether `userId` holds a moderator grant on `repoId` (#259), for what a page shows. Reads storage only, never the
+ * clock, like `repoCommentReader`: the expiry job deletes the grant, so a query changes exactly when it does.
+ */
+export async function isRepoCommentModerator(ctx: Ctx, repoId: number, userId: string | null): Promise<boolean> {
+  return userId !== null && await moderatorRow(ctx, repoId, userId) !== null;
+}
+
+/**
+ * The role by which `userId` may moderate `repoId` right now, or null. Called by a mutation after it required the
+ * caller's write grant: the role comes from the grant the trusted Worker recorded, never from the request, and a
+ * grant past its expiry counts for nothing even before its job deleted it.
+ */
+export async function liveRepoCommentModerator(ctx: MutationCtx, repoId: number, userId: string): Promise<Doc<"repoCommentModerators">["role"] | null> {
+  const held = await moderatorRow(ctx, repoId, userId);
+  return held && held.expiresAt > Date.now() ? held.role : null;
 }
 
 /** Writers must be signed in and hold a live grant; mutations may read the clock, so expiry is checked too. */
@@ -174,10 +203,62 @@ export const expireGrant = internalMutation({
   },
 });
 
+/**
+ * The serving Worker's record of a role the control Worker just stated for a reader it authorized (#259). It refuses
+ * what `grant` refuses (a decision older than a revocation Convex holds, a lapsed expiry), and also a repository no
+ * read grant has made known or that was removed: a role never brings a repository back. The role replaces the one
+ * held, so a demotion applies at once; a promotion or a longer expiry extends it like a read grant.
+ */
+export const grantModerator = mutation({
+  args: {
+    internalSecret: v.string(),
+    repoId: v.number(),
+    userId: v.string(),
+    role: moderationRoleValidator,
+    epoch: v.number(),
+    expiresAt: v.number(),
+  },
+  handler: async (ctx, args): Promise<{ granted: false } | { granted: true; expiresAt: number }> => {
+    requireInternalSecret(args.internalSecret);
+    if (!validRepoId(args.repoId) || !validUserId(args.userId) || !validEpoch(args.epoch) || !Number.isSafeInteger(args.expiresAt)) publicError("invalid_input");
+    const now = Date.now();
+    const expiresAt = Math.min(args.expiresAt, now + GRANT_MAX_MS);
+    if (expiresAt <= now || ((await epochRow(ctx, args.userId))?.epoch ?? 0) > args.epoch) return { granted: false };
+    const repo = await repoRow(ctx, args.repoId);
+    if (!repo || repo.removedAt !== undefined) return { granted: false };
+    const existing = await moderatorRow(ctx, args.repoId, args.userId);
+    if (!existing) {
+      const grantId = await ctx.db.insert("repoCommentModerators", { repoId: args.repoId, userId: args.userId, role: args.role, epoch: args.epoch, expiresAt });
+      await ctx.scheduler.runAt(expiresAt, internal.repoCommentAccess.expireModerator, { grantId });
+      return { granted: true, expiresAt };
+    }
+    if (existing.expiresAt < expiresAt - GRANT_EXTEND_SLACK_MS || existing.epoch < args.epoch || existing.role !== args.role) {
+      const extended = { role: args.role, expiresAt: Math.max(existing.expiresAt, expiresAt), epoch: Math.max(existing.epoch, args.epoch) };
+      await ctx.db.patch(existing._id, extended);
+      return { granted: true, expiresAt: extended.expiresAt };
+    }
+    return { granted: true, expiresAt: existing.expiresAt };
+  },
+});
+
+export const expireModerator = internalMutation({
+  args: { grantId: v.id("repoCommentModerators") },
+  handler: async (ctx, { grantId }): Promise<null> => {
+    const row = await ctx.db.get(grantId);
+    if (!row) return null;
+    if (row.expiresAt <= Date.now()) await ctx.db.delete(grantId);
+    else await ctx.scheduler.runAt(row.expiresAt, internal.repoCommentAccess.expireModerator, { grantId });
+    return null;
+  },
+});
+
 async function deleteUserGrants(ctx: MutationCtx, userId: string): Promise<void> {
-  const grants = await ctx.db.query("repoCommentGrants").withIndex("by_user", q => q.eq("userId", userId)).take(REVOKE_BATCH + 1);
-  await Promise.all(grants.slice(0, REVOKE_BATCH).map(row => ctx.db.delete(row._id)));
-  if (grants.length > REVOKE_BATCH) await ctx.scheduler.runAfter(0, internal.repoCommentAccess.revokeRemaining, { userId });
+  const [grants, moderators] = await Promise.all([
+    ctx.db.query("repoCommentGrants").withIndex("by_user", q => q.eq("userId", userId)).take(REVOKE_BATCH + 1),
+    ctx.db.query("repoCommentModerators").withIndex("by_user", q => q.eq("userId", userId)).take(REVOKE_BATCH + 1),
+  ]);
+  await Promise.all([...grants.slice(0, REVOKE_BATCH), ...moderators.slice(0, REVOKE_BATCH)].map(row => ctx.db.delete(row._id)));
+  if (grants.length > REVOKE_BATCH || moderators.length > REVOKE_BATCH) await ctx.scheduler.runAfter(0, internal.repoCommentAccess.revokeRemaining, { userId });
 }
 
 /** P5's revocation epoch for `userId` (the value it wrote to KV): every grant the user holds ends now. */
@@ -203,9 +284,12 @@ export const revokeRemaining = internalMutation({
 });
 
 async function deleteRepoGrants(ctx: MutationCtx, repoId: number): Promise<void> {
-  const grants = await ctx.db.query("repoCommentGrants").withIndex("by_repo_user", q => q.eq("repoId", repoId)).take(REVOKE_BATCH + 1);
-  await Promise.all(grants.slice(0, REVOKE_BATCH).map(row => ctx.db.delete(row._id)));
-  if (grants.length > REVOKE_BATCH) await ctx.scheduler.runAfter(0, internal.repoCommentAccess.removeRemaining, { repoId });
+  const [grants, moderators] = await Promise.all([
+    ctx.db.query("repoCommentGrants").withIndex("by_repo_user", q => q.eq("repoId", repoId)).take(REVOKE_BATCH + 1),
+    ctx.db.query("repoCommentModerators").withIndex("by_repo_user", q => q.eq("repoId", repoId)).take(REVOKE_BATCH + 1),
+  ]);
+  await Promise.all([...grants.slice(0, REVOKE_BATCH), ...moderators.slice(0, REVOKE_BATCH)].map(row => ctx.db.delete(row._id)));
+  if (grants.length > REVOKE_BATCH || moderators.length > REVOKE_BATCH) await ctx.scheduler.runAfter(0, internal.repoCommentAccess.removeRemaining, { repoId });
 }
 
 const repoIdsArgs = { internalSecret: v.string(), repoIds: v.array(v.number()) };
@@ -216,10 +300,15 @@ function requireRepoIds(args: { internalSecret: string; repoIds: number[] }): Se
   return new Set(args.repoIds);
 }
 
-async function audit(ctx: MutationCtx, action: string, repoId: number, metadata: Record<string, number>, now: number): Promise<void> {
+/** One audit event about a repository's comments, found by resource. It records who did what and when, never a comment's text. */
+export async function recordRepoAudit(ctx: MutationCtx, actorId: string, action: string, repoId: number, metadata: Record<string, string | number>, now: number): Promise<void> {
   await ctx.db.insert("auditEvents", {
-    organizationId: AUDIT_ORGANIZATION, actorId: AUDIT_ACTOR, action, resourceType: "repository", resourceId: String(repoId), metadata, createdAt: now,
+    organizationId: AUDIT_ORGANIZATION, actorId, action, resourceType: "repository", resourceId: String(repoId), metadata, createdAt: now,
   });
+}
+
+function audit(ctx: MutationCtx, action: string, repoId: number, metadata: Record<string, number>, now: number): Promise<void> {
+  return recordRepoAudit(ctx, AUDIT_ACTOR, action, repoId, metadata, now);
 }
 
 /** P5 saw these repositories uninstalled or deleted: hide their comments now. Nothing is purged until GitHub confirms it (`purgeRepos`). */

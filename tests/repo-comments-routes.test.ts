@@ -17,8 +17,9 @@ const priv = `/r/${privateRepo.owner}/${privateRepo.name}`;
 
 let fixture: Awaited<ReturnType<typeof repoReadFixture>>;
 let grants: Array<Record<string, unknown>>;
+let moderatorGrants: Array<Record<string, unknown>>;
 let snapshots: Array<Record<string, unknown>>;
-let convex: { answer: (args: Record<string, unknown>) => Response; snapshot: (args: Record<string, unknown>) => Response };
+let convex: { answer: (args: Record<string, unknown>) => Response; moderator: (args: Record<string, unknown>) => Response; snapshot: (args: Record<string, unknown>) => Response };
 const page = [{ _id: "t1", body: "First" }];
 
 beforeEach(async () => {
@@ -28,9 +29,11 @@ beforeEach(async () => {
   clearCommentGrantMemory();
   stubSessions({ "reader-token.sig": users.reader, "outsider-token.sig": users.outsider, "down-token.sig": "down" });
   grants = [];
+  moderatorGrants = [];
   snapshots = [];
   convex = {
     answer: args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } }),
+    moderator: args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } }),
     snapshot: () => Response.json({ status: "success", value: { page, isDone: false, continueCursor: "c" } }),
   };
   const sessions = globalThis.fetch;
@@ -46,11 +49,11 @@ beforeEach(async () => {
     }
     if (url === `${process.env.CONVEX_URL}/api/mutation`) {
       const { path, args: [args] } = JSON.parse(init?.body as string) as { path: string; args: [Record<string, unknown>] };
-      expect(path).toBe("repoCommentAccess:grant");
+      expect(["repoCommentAccess:grant", "repoCommentAccess:grantModerator"]).toContain(path);
       expect(args.internalSecret).toBe(process.env.CONVEX_INTERNAL_SECRET);
       const { internalSecret: _secret, ...recorded } = args;
-      grants.push(recorded);
-      return Promise.resolve(convex.answer(args));
+      (path === "repoCommentAccess:grant" ? grants : moderatorGrants).push(recorded);
+      return Promise.resolve(path === "repoCommentAccess:grant" ? convex.answer(args) : convex.moderator(args));
     }
     return sessions(input, init);
   }) as typeof fetch;
@@ -303,7 +306,10 @@ describe("the first comments come with the first access answer (#284)", () => {
 describe("commentAccess", () => {
   const recorder = (answer: number | null) => {
     const calls: unknown[] = [];
-    const grants: CommentGrants = { record: input => { calls.push(input); return Promise.resolve(answer ?? null); } };
+    const grants: CommentGrants = {
+      record: input => { calls.push(input); return Promise.resolve(answer ?? null); },
+      recordModerator: input => { calls.push(input); return Promise.resolve(answer ?? null); },
+    };
     return { calls, grants };
   };
 
@@ -353,5 +359,94 @@ describe("commentAccess", () => {
     expect(await convexCommentGrants.record(input)).toBeNull();
     stub(null);
     await expect(convexCommentGrants.record(input)).resolves.toBeNull();
+  });
+});
+
+describe("moderators of a repository's comments (#259)", () => {
+  const first = "?path=docs%2Fguide.md";
+
+  it("records a maintainer's role for a private repository once the read grant is, and reads their page as a moderator's", async () => {
+    fixture.access.epochs.set(users.reader, 42);
+    fixture.access.moderate(users.reader, privateRepo.id, "maintain");
+    const granted = await access(priv, { cookie: sessions.reader }, first);
+    expect(granted.status).toBe(200);
+    const { expiresAt } = await granted.json() as { expiresAt: number };
+    // The private grant's own epoch (the one the read path checked) orders the role, and it expires with the read grant.
+    expect(moderatorGrants).toEqual([{ repoId: privateRepo.id, userId: users.reader, role: "maintain", epoch: 42, expiresAt }]);
+    expect(grants).toEqual([{ repoId: privateRepo.id, userId: users.reader, epoch: 42, expiresAt }]);
+    expect(snapshots).toEqual([{ repoId: privateRepo.id, path: "docs/guide.md", userId: users.reader, epoch: 42, moderator: true }]);
+    expect(fixture.access.calls.moderation).toEqual([{ viewer: users.reader, repo: "octo/secret-docs" }]);
+    // The shell's next renewal within the grant's first half asks nobody and writes nothing.
+    const cookie = `${sessions.reader}; ${capability(granted)}`;
+    expect((await access(priv, { cookie }, first)).status).toBe(200);
+    expect(fixture.access.calls.moderation).toHaveLength(1);
+    expect(moderatorGrants).toHaveLength(1);
+  });
+
+  it("asks the reader's own epoch before the role for a public repository, whose grant names nobody", async () => {
+    fixture.access.epochs.set(users.reader, 9);
+    fixture.access.moderate(users.reader, publicRepo.id, "admin");
+    const response = await access(pub, { cookie: sessions.reader }, first);
+    const { expiresAt } = await response.json() as { expiresAt: number };
+    expect(moderatorGrants).toEqual([{ repoId: publicRepo.id, userId: users.reader, role: "admin", epoch: 9, expiresAt }]);
+    expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 0, expiresAt }]);
+    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader, moderator: true }]);
+  });
+
+  it("gives no role to a reader who is not a moderator, an anonymous reader or a reader the session cannot name, and remembers it", async () => {
+    // Writers, triagers and readers are not moderators: the control Worker says null for them.
+    expect((await access(pub, { cookie: sessions.reader }, first)).status).toBe(200);
+    expect((await access(pub, { cookie: sessions.reader }, first)).status).toBe(200);
+    expect(fixture.access.calls.moderation).toHaveLength(1);
+    for (const headers of [{}, { cookie: "__Host-better-auth.session_token=unknown-token.sig" }, { cookie: "__Host-better-auth.session_token=down-token.sig" }] as Array<Record<string, string>>) {
+      expect((await access(pub, headers, first)).status).toBe(200);
+    }
+    expect(fixture.access.calls.moderation).toHaveLength(1);
+    expect(moderatorGrants).toEqual([]);
+    expect(snapshots.every(asked => !("moderator" in asked))).toBe(true);
+  });
+
+  it("ignores every role a request claims: only the control Worker's word counts", async () => {
+    const forged = { cookie: sessions.reader, "X-Rendro-Role": "admin", "X-Moderator": "true", Authorization: "Bearer admin" };
+    const response = await access(pub, forged, `${first}&role=admin&moderator=true&userId=${users.outsider}`);
+    expect(response.status).toBe(200);
+    expect(moderatorGrants).toEqual([]);
+    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
+    // Even a body is never read for a role.
+    const body = await app.request(`${ORIGIN}${pub}/comment-access`, {
+      method: "POST", headers: { Origin: ORIGIN, cookie: sessions.reader, "Content-Type": "application/json" }, body: JSON.stringify({ role: "admin", moderator: true }),
+    }, fixture.env, fixture.ctx);
+    expect(body.status).toBe(200);
+    expect(moderatorGrants).toEqual([]);
+  });
+
+  it("still grants reading and writing when the role cannot be asked", async () => {
+    fixture.access.moderate(users.reader, publicRepo.id, "admin");
+    fixture.access.moderationUnavailable = true;
+    const response = await access(pub, { cookie: sessions.reader }, first);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ threads: { path: "docs/guide.md" } });
+    expect(moderatorGrants).toEqual([]);
+    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
+    // An outage is not remembered as "no role": the next renewal asks again, and the role arrives.
+    fixture.access.moderationUnavailable = false;
+    await access(pub, { cookie: sessions.reader }, first);
+    expect(moderatorGrants).toHaveLength(1);
+  });
+
+  it("never records a role without a read grant, and never remembers one Convex refused or could not take", async () => {
+    fixture.access.moderate(users.reader, publicRepo.id, "maintain");
+    convex.answer = () => Response.json({ status: "success", value: { granted: false } });
+    expectPlainNotFound(await access(pub, { cookie: sessions.reader }));
+    expect(moderatorGrants).toEqual([]);
+    convex.answer = args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } });
+    convex.moderator = () => Response.json({ status: "success", value: { granted: false } });
+    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
+    convex.moderator = () => new Response("down", { status: 503 });
+    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
+    // Both refusals left nothing in memory: the role is recorded again at the next request.
+    convex.moderator = args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } });
+    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
+    expect(moderatorGrants).toHaveLength(3);
   });
 });

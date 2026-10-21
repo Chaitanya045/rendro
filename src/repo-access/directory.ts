@@ -15,6 +15,9 @@
  *   quota), and one GitHub has not confirmed for `PUBLIC_CONFIRM_MAX_MS`
  *   grants nobody. A missed `privatized` delivery is then caught on the next
  *   read, and the visibility epoch moves exactly as that delivery would.
+ * - Moderation roles (#259): the same mirror also records, per repository, the admin or maintain role GitHub
+ *   states for the user (the `permissions` of their user-token listing, or the collaborator permission of a
+ *   single-repository check), so a role is as old as read access and ends with it or sooner.
  * - The epoch outbox: users whose capabilities must be re-decided. Epochs are
  *   written to KV only after the registry and the mirror already deny. Where
  *   comments are configured (#254), each epoch, and every repository GitHub
@@ -34,7 +37,7 @@ import { DeliveryDedupe } from "@/ingest/github/delivery-dedupe";
 import { GitHubError } from "@/ingest/github/source";
 import type { InstallationTokenProvider } from "@/ingest/github/token";
 import type { DurableStorageLike } from "@/ingest/orchestrator/coordinator";
-import { RepoAccessUnavailable, repoKey, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord } from "@/repo-read/access";
+import { RepoAccessUnavailable, repoKey, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type ModerationRole, type RepoRecord } from "@/repo-read/access";
 import type { EventPlan, RepoHint } from "./events";
 import type { GitHubAccessClient, ListedInstallation, ListedRepo, Page } from "./github";
 import { confirmRemoval } from "./removal";
@@ -199,6 +202,12 @@ interface PageCache {
   etag: string | null;
   ids: number[];
   next: boolean;
+  /**
+   * The moderation role the user holds on the repositories of this page that GitHub said they hold one on (#259),
+   * by repository ID. It rides with the page: a 304 keeps it, a fresh page replaces it, and the mirror's
+   * generation and age bound it exactly as they bound read access. Absent: no roles.
+   */
+  roles?: Record<string, ModerationRole>;
 }
 
 interface Mirror {
@@ -234,6 +243,8 @@ interface ReaderCheck {
   allowed: boolean;
   at: number;
   gen: number;
+  /** The reader's moderation role (#259); absent in a check stored before roles, which is no role. */
+  role?: ModerationRole;
 }
 
 type Need =
@@ -263,6 +274,15 @@ function pageIds(pages: PageCache[]): Set<number> {
 
 function mirrorIds(mirror: Mirror | null): Set<number> {
   return pageIds(mirror ? Object.values(mirror.repoPages).flat() : []);
+}
+
+/** The moderation role the mirror records per repository ID (#259). Fail closed: only a literal admin or maintain counts. */
+function mirrorRoles(mirror: Mirror): Map<number, ModerationRole> {
+  const roles = new Map<number, ModerationRole>();
+  for (const page of Object.values(mirror.repoPages).flat()) {
+    for (const [id, role] of Object.entries(page.roles ?? {})) if (role === "admin" || role === "maintain") roles.set(Number(id), role);
+  }
+  return roles;
 }
 
 function mirrorInstallations(mirror: Mirror | null): Set<number> {
@@ -306,6 +326,12 @@ export class AccessDirectory {
           return Response.json({ error: "Unavailable" }, { status: 503 });
         }
       }
+      case "/moderation":
+        try {
+          return Response.json({ role: await this.moderationRole(body.viewer as string, body.owner as string, body.name as string) });
+        } catch {
+          return Response.json({ error: "Unavailable" }, { status: 503 });
+        }
       case "/link":
         await this.link(body as unknown as LinkRequest);
         return new Response(null, { status: 204 });
@@ -360,6 +386,42 @@ export class AccessDirectory {
     }
   }
 
+  /**
+   * The role that lets `viewer` moderate the comments of `owner/name` (#259), null for everyone else: only GitHub's
+   * admin and maintain count. It rests on the same mirror as read access, so it is exactly as current: read access
+   * is decided first (an installation, repository or mirror that needs GitHub is refreshed), then the role is read
+   * from what the mirror (or, for an installation listed in part, the single-repository check) recorded. A mirror an
+   * event invalidated is listed again before it answers, so a downgrade ends moderation no later than it ends
+   * reading. `RepoAccessUnavailable` when unknown; never a role on doubt.
+   */
+  async moderationRole(viewer: string, owner: string, name: string): Promise<ModerationRole | null> {
+    try {
+      const repo = await this.authorize(viewer, owner, name);
+      if (!repo) return null;
+      for (let round = 0; round < MAX_ROUNDS; round += 1) {
+        const user = await this.user(viewer);
+        if (!user?.tokens) return null;
+        const mirror = await this.storage.get<Mirror>(`mirror:${viewer}`);
+        // A public repository's read decision never touched the mirror: a stale one is listed here.
+        if (!mirror || mirror.gen !== user.gen || this.deps.now() - mirror.fetchedAt >= MIRROR_TTL_MS) {
+          await this.refreshMirror(viewer, user);
+          continue;
+        }
+        if (mirrorIds(mirror).has(repo.id)) return mirrorRoles(mirror).get(repo.id) ?? null;
+        const found = await this.lookup(owner, name);
+        // Renamed or removed since the read decision: no role for what that decision named.
+        if (found?.entry.id !== repo.id || !mirror.partial.includes(found.entry.installation as number)) return null;
+        const cached = await this.freshCheck(viewer, user, repo.id);
+        if (cached) return cached.allowed ? cached.role ?? null : null;
+        await this.checkReader(viewer, user, found.entry);
+      }
+      throw new RepoAccessUnavailable();
+    } catch (error) {
+      if (!(error instanceof RepoAccessUnavailable)) this.deps.log("access.unavailable", { reason: error instanceof GitHubError ? error.kind : "error" });
+      throw new RepoAccessUnavailable();
+    }
+  }
+
   /** A name's registry records, if it names a live repository of a known installation. Storage reads only. */
   private async lookup(owner: string, name: string): Promise<{ entry: RepoEntry; installation: InstallationEntry } | null> {
     const key = repoKey(owner, name);
@@ -397,9 +459,14 @@ export class AccessDirectory {
     if (mirrorIds(mirror).has(entry.id)) return { answer: repoRecord(entry) };
     if (!mirror.partial.includes(entry.installation as number)) return { answer: null };
     // The installation was listed only in part: GitHub answers for this one repository, kept as long as a mirror.
-    const cached = await this.storage.get<ReaderCheck>(`check:${viewer}:${entry.id}`);
-    if (cached && cached.gen === user.gen && this.deps.now() - cached.at < MIRROR_TTL_MS) return { answer: cached.allowed ? repoRecord(entry) : null };
-    return { need: { kind: "reader", user, entry } };
+    const cached = await this.freshCheck(viewer, user, entry.id);
+    return cached ? { answer: cached.allowed ? repoRecord(entry) : null } : { need: { kind: "reader", user, entry } };
+  }
+
+  /** The single-repository check GitHub answered for `userId` in the current generation, if it is no older than a mirror may be. */
+  private async freshCheck(userId: string, user: UserEntry, repoId: number): Promise<ReaderCheck | null> {
+    const cached = await this.storage.get<ReaderCheck>(`check:${userId}:${repoId}`);
+    return cached && cached.gen === user.gen && this.deps.now() - cached.at < MIRROR_TTL_MS ? cached : null;
   }
 
   /** The GitHub work a decision needs. Results an event overtook meanwhile are dropped, and the next decision sees why. */
@@ -421,8 +488,8 @@ export class AccessDirectory {
   private async checkReader(userId: string, user: UserEntry, entry: RepoEntry): Promise<void> {
     const installation = entry.installation as number;
     const key = `check:${userId}:${entry.id}`;
-    const allowed = await this.guarded(key, () => this.asInstallation(installation, (token) => this.deps.github.canRead(`installation:${installation}`, token, entry.owner, entry.name, user.login)));
-    if ((await this.user(userId))?.gen === user.gen) await this.storage.put(key, { allowed, at: this.deps.now(), gen: user.gen } satisfies ReaderCheck);
+    const { read: allowed, role } = await this.guarded(key, () => this.asInstallation(installation, (token) => this.deps.github.collaboratorAccess(`installation:${installation}`, token, entry.owner, entry.name, user.login)));
+    if ((await this.user(userId))?.gen === user.gen) await this.storage.put(key, { allowed, at: this.deps.now(), gen: user.gen, ...role ? { role } : {} } satisfies ReaderCheck);
   }
 
   private async checkInstallation(entry: InstallationEntry): Promise<void> {
@@ -549,12 +616,13 @@ export class AccessDirectory {
       }
     };
     const listing: Listing = { installationPages: [], repoPages: {}, partial: [], installations: [], repos: [] };
-    const pages = async <T>(cached: PageCache[] | undefined, limit: number, fetchPage: (page: number, etag: string | null) => Promise<Page<T>>, idOf: (item: T) => number, collect: (items: T[]) => void) => {
+    const pages = async <T>(cached: PageCache[] | undefined, limit: number, fetchPage: (page: number, etag: string | null) => Promise<Page<T>>, idOf: (item: T) => number, collect: (items: T[]) => void, rolesOf?: (items: T[]) => Record<string, ModerationRole>) => {
       const out: PageCache[] = [];
       for (let page = 1; page <= limit; page += 1) {
         const before = cached?.[page - 1];
         const result = await call(() => fetchPage(page, before?.etag ?? null));
-        const current = result ? { etag: result.etag, ids: result.items.map(idOf), next: result.next } : before as PageCache;
+        const roles = result && rolesOf ? rolesOf(result.items) : {};
+        const current: PageCache = result ? { etag: result.etag, ids: result.items.map(idOf), next: result.next, ...Object.keys(roles).length ? { roles } : {} } : before as PageCache;
         if (result) collect(result.items);
         out.push(current);
         if (!current.next) break;
@@ -570,7 +638,8 @@ export class AccessDirectory {
       if (suspended.has(installation)) continue;
       const repoPages = budgetPages > 0 ? await pages(previous?.repoPages[installation], budgetPages,
         (page, etag) => this.deps.github.installationRepositories(budget, token, installation, page, etag), (item) => item.id,
-        (items) => listing.repos.push(...items.map((item) => ({ ...item, installation })))) : [];
+        (items) => listing.repos.push(...items.map((item) => ({ ...item, installation }))),
+        (items) => Object.fromEntries(items.flatMap((item) => item.role ? [[String(item.id), item.role] as const] : []))) : [];
       budgetPages -= repoPages.length;
       listing.repoPages[installation] = repoPages;
       if (repoPages.length === 0 || repoPages[repoPages.length - 1].next) listing.partial.push(installation);
