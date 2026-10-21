@@ -412,7 +412,8 @@ export class AccessDirectory {
         // Renamed or removed since the read decision: no role for what that decision named.
         if (found?.entry.id !== repo.id || !mirror.partial.includes(found.entry.installation as number)) return null;
         const cached = await this.freshCheck(viewer, user, repo.id);
-        if (cached) return cached.allowed ? cached.role ?? null : null;
+        // A role is only ever stored with an allowed read (`collaboratorAccess`), so a denied check carries none.
+        if (cached) return cached.role ?? null;
         await this.checkReader(viewer, user, found.entry);
       }
       throw new RepoAccessUnavailable();
