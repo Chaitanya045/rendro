@@ -120,7 +120,7 @@ export default async function globalSetup(config?: FullConfig) {
       root,
       workers: [
         { configPath, vars, secrets: vars },
-        { configPath: controlPath, vars: controlVars, secrets: controlSecrets },
+        { configPath: controlPath, env: controlWorker.env, vars: controlVars, secrets: controlSecrets },
       ],
     });
     closers.push(() => server.close());

@@ -656,7 +656,7 @@ An anchor re-attaches to its quote in a later commit by text and section, not by
 |---|---|
 | Web app | `https://rendro.app` (`https://dev.rendro.app` for the development environment) |
 | Serving Worker | Cloudflare Workers custom-domain deployment (`wrangler.toml`) |
-| Ingest and control Workers | `wrangler.ingest.toml`, `wrangler.control.toml` (development and tests only until the GitHub App exists) |
+| Ingest and control Workers | `wrangler.ingest.toml`, `wrangler.control.toml`: the top level is production (`rendro-ingest`, `rendro-control`; not deployed until the GitHub App exists), `[env.development]` the development Workers |
 | Convex API | `CONVEX_URL` |
 | Convex HTTP actions | `CONVEX_SITE_URL` |
 
@@ -667,8 +667,10 @@ pnpm preflight:prod                   # production wiring against scripts/produc
 pnpm exec convex deploy
 pnpm run deploy                       # serving Worker (production)
 pnpm run deploy --env development     # serving Worker (development)
-pnpm exec wrangler deploy --config wrangler.ingest.toml
-pnpm exec wrangler deploy --config wrangler.control.toml
+pnpm exec wrangler deploy --config wrangler.ingest.toml --env development    # ingest Worker (development)
+pnpm exec wrangler deploy --config wrangler.control.toml --env development   # control Worker (development)
+pnpm exec wrangler deploy --config wrangler.ingest.toml                      # ingest Worker (production, once wired)
+pnpm exec wrangler deploy --config wrangler.control.toml                     # control Worker (production, once wired)
 ```
 
 `pnpm run deploy` rebuilds the browser assets before uploading the Worker. Use
@@ -1154,12 +1156,12 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 
 ### Ingest Worker and bindings (development and tests only)
 
-`wrangler.ingest.toml` defines a separate ingest Worker, `rendro-ingest-dev`. It has no routes, no `workers.dev` URL and no deploy script, and `wrangler.toml` does not refer to it. `tests/ingest-workerd.test.ts` runs it on real workerd through Wrangler's test harness, with outbound fetches routed to the in-process fake GitHub.
+`wrangler.ingest.toml` defines a separate ingest Worker: `rendro-ingest-dev` under `[env.development]`, and at the top level the production `rendro-ingest`, a skeleton without its R2 bucket and D1 database until production is wired ([SETUP.md](SETUP.md#production-readiness-checklist)). It has no routes, no `workers.dev` URL and no deploy script, and `wrangler.toml` does not refer to it. `tests/ingest-workerd.test.ts` runs the development Worker on real workerd through Wrangler's test harness, with outbound fetches routed to the in-process fake GitHub.
 
 | Binding | Type | Purpose |
 |---|---|---|
 | `INGEST_BUCKET` | R2 | Content cache under `gh/v1/` (GitHub stays the source of truth) |
-| `INGEST_QUEUE` | Queue producer and consumer (`rendro-ingest-dev`, dead-letter queue `rendro-ingest-dev-dlq`, 10 retries) | One message per "bring this branch up to date" |
+| `INGEST_QUEUE` | Queue producer and consumer (`rendro-ingest`, dead-letter queue `rendro-ingest-dlq`; `rendro-ingest-dev` and `rendro-ingest-dev-dlq` in development; 10 retries) | One message per "bring this branch up to date" |
 | `INGEST_COORDINATOR` | Durable Object `RepoIngestCoordinator` (SQLite-backed, migration `v1`) | One instance per repository, named `repo:<GitHub repository ID>` |
 | Cron `*/10 * * * *` | Scheduled handler | Re-checks heads and redelivers failed webhooks |
 | `GITHUB_API_ORIGIN`, `GITHUB_ARCHIVE_ORIGINS` | Vars, optional | Point the client at a fake GitHub; the defaults are `api.github.com` and `codeload.github.com` |
@@ -1620,7 +1622,7 @@ This section covers who may read which repository (#243, part of epic #214): the
 
 ### Control Worker
 
-`wrangler.control.toml` defines `rendro-control-dev`. It has no route, no `workers.dev` URL and no deploy script, and `wrangler.toml` does not bind it yet. It answers:
+`wrangler.control.toml` defines `rendro-control-dev` under `[env.development]`, and at the top level the production `rendro-control`, a skeleton without its KV namespace until production is wired. It has no route, no `workers.dev` URL and no deploy script, and `wrangler.toml` does not bind it yet. It answers:
 
 | Request | Who sends it | What it does |
 |---|---|---|

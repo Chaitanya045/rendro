@@ -1,11 +1,15 @@
-# Control Worker for the GitHub pivot (#214, phase P5, #243). DEVELOPMENT AND TESTS ONLY.
+# Control Worker for the GitHub pivot (#214, phase P5, #243).
 # No route, no workers.dev URL, no deploy script; wrangler.toml does not bind it yet.
 # It is the serving Worker's REPO_ACCESS service (the repository permission source) and receives
 # GitHub's permission webhooks. The serving Worker must bind it with entrypoint = "RepoAccessService":
 # only that named entrypoint serves /v1/authorize and /v1/accounts/*, the default handler the webhook only. Bindings and what the owner must configure are documented in
 # docs/TECHNICAL.md ("Repository permission mirror"). tests/repo-access-workerd.test.ts and the
 # E2E suite run it on real workerd against a fake GitHub.
-name = "rendro-control-dev"
+#
+# The top level is the production Worker (#336), as in wrangler.toml. It is a skeleton: production's KV
+# namespace is not bound yet, so `pnpm preflight:prod` reports it missing until the owner creates it
+# (docs/SETUP.md, "Production readiness checklist"). Development and tests use [env.development].
+name = "rendro-control"
 main = "src/repo-access/entry.ts"
 compatibility_date = "2025-07-06"
 workers_dev = false
@@ -30,8 +34,29 @@ class_name = "RepoAccessDirectory"
 tag = "v1"
 new_sqlite_classes = ["RepoAccessDirectory"]
 
+# ── Development and tests (`--env development`) ──
+# Wrangler does not inherit bindings, vars or secrets into an environment, so this section repeats all of them.
+[env.development]
+name = "rendro-control-dev"
+workers_dev = false
+
+[env.development.secrets]
+required = ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET"]
+
+[env.development.observability.logs]
+enabled = true
+invocation_logs = false
+
+[[env.development.durable_objects.bindings]]
+name = "REPO_ACCESS_DIRECTORY"
+class_name = "RepoAccessDirectory"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["RepoAccessDirectory"]
+
 # Revocation epochs: written here, read by the serving Worker (its REPO_EPOCHS binding).
 # The ID is a placeholder; the owner creates the namespace (see docs/TECHNICAL.md).
-[[kv_namespaces]]
+[[env.development.kv_namespaces]]
 binding = "REPO_EPOCHS"
 id = "rendro-repo-epochs-dev"
