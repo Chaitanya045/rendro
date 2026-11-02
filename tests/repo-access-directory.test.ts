@@ -841,6 +841,7 @@ describe("token renewal races", () => {
     const world = accessFixture();
     await world.setup();
     world.clock.time += 8 * 60 * 60 * 1000;
+    const renewals = vi.spyOn(world.directory as unknown as { renewAccessToken: (...args: unknown[]) => Promise<string> }, "renewAccessToken");
     let release!: () => void;
     world.github.gate = new Promise<void>((resolve) => { release = resolve; });
     world.github.gateFilter = (endpoint) => endpoint === "oauth";
@@ -848,6 +849,10 @@ describe("token renewal races", () => {
     await vi.waitFor(() => expect(world.github.held).toBe(1));
     await world.deliver("membership", { action: "added", member: world.userPayload(world.people.member) });
     const second = world.read("member", world.teamDocs);
+    // Release only once the second read has joined the renewal in flight. Otherwise, on a loaded machine, the
+    // first renewal can finish before the second read arrives, and the join path goes untested.
+    await vi.waitFor(() => expect(renewals).toHaveBeenCalledTimes(2));
+    expect(renewals.mock.results[1].value).toBe(renewals.mock.results[0].value);
     release();
     // The first refresh's listing is dropped; that view joins the second refresh, which used the same renewal.
     expect(await first).toEqual(record(world.teamDocs));
