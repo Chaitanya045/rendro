@@ -327,7 +327,14 @@ describe("unlinking GitHub (#338)", () => {
     await w.emailUser("member@example.test");
     const { jar } = await w.signIn(person);
     const reader = await w.whoami(jar);
-    const response = await w.post(jar, "/api/auth/unlink-account", { accountId: await w.accountId(jar, "github") });
+    const accountId = await w.accountId(jar, "github");
+    // Entries of the account list that are not accounts are skipped.
+    const real = fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const response = await real(input, init);
+      return new URL(input instanceof Request ? input.url : String(input)).pathname === "/api/auth/list-accounts" ? Response.json([null, ...await response.json() as unknown[]]) : response;
+    }));
+    const response = await w.post(jar, "/api/auth/unlink-account", { accountId });
     expect(response.status).toBe(200);
     expect(w.calls.at(-1)).toEqual({ path: "/v1/accounts/unlink", body: { userId: reader!.id } });
     expect(await w.githubAccounts()).toEqual([]);
@@ -373,6 +380,25 @@ describe("unlinking GitHub (#338)", () => {
       expect(response.status).toBe(503);
       expect(response.headers.get("retry-after")).toBe("5");
     }
+    expect(w.calls).toHaveLength(calls);
+    expect(await w.githubAccounts()).toHaveLength(1);
+  });
+
+  it("unlinks nothing when the reader's session cannot be looked up", async () => {
+    const w = await world();
+    const person = w.github.user("octo-member", 7006, verified("member@example.test"));
+    await w.emailUser("member@example.test");
+    const { jar } = await w.signIn(person);
+    const accountId = await w.accountId(jar, "github");
+    const calls = w.calls.length;
+    const real = fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      return new URL(input instanceof Request ? input.url : String(input)).pathname === "/api/auth/get-session" ? new Response("unavailable", { status: 500 }) : real(input, init);
+    }));
+    const response = await w.post(jar, "/api/auth/unlink-account", { accountId });
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    vi.stubGlobal("fetch", real);
     expect(w.calls).toHaveLength(calls);
     expect(await w.githubAccounts()).toHaveLength(1);
   });
