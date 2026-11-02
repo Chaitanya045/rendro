@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { test, expect } from "./actor-fixtures";
 import {
   addReply, anchorOn, card, convexCallWith, createThread, journeyDoc, memberRole, open, openDrawer, repoIds, repos, sessionToken, threadsAs, ui, unique, writeThread,
@@ -25,20 +25,6 @@ async function offers(page: Page, body: string) {
   await expect(thread).toBeVisible();
   const has = async (testId: string) => await thread.getByTestId(testId).count() > 0;
   return { resolve: await has("commentor-resolve-btn"), archive: await has("commentor-archive-btn"), delete: await has("commentor-delete-btn"), deleteReply: await has("commentor-delete-reply-btn") };
-}
-
-/**
- * Click `target` until `effect` shows (or, with "gone", until it no longer does). The widget rebuilds its list whenever
- * its subscription delivers a change, and a click that straddles a rebuild is dropped: the button it pressed is gone
- * before it is released (#350). A click that did take effect has also taken its target away or disabled it, so a retry
- * only ever repeats a click that never registered.
- */
-async function clickUntil(target: Locator, effect: Locator, expected: "visible" | "gone" = "visible") {
-  await expect(async () => {
-    if (await target.count() > 0) await target.click({ timeout: 5_000 });
-    if (expected === "visible") await expect(effect).toBeVisible({ timeout: 3_000 });
-    else await expect(effect).toHaveCount(0, { timeout: 3_000 });
-  }).toPass({ timeout: 40_000 });
 }
 
 test("a maintainer archives and deletes other readers' comments; a writer cannot, and a demotion takes the rights back at once", async ({ actor, seeded }) => {
@@ -102,16 +88,13 @@ test("a maintainer archives and deletes other readers' comments; a writer cannot
     // The author's open page follows, and the History view holds it.
     await expect.poll(async () => await ui(author.page).locator(".content-head .count").getAttribute("aria-label")).toBe("2 active comments");
     expect((await writeThread(await sessionToken(member), scope, "archive", rudeId, { archived: false })).ok).toBe(true);
-    // The maintainer's own page learns of that write from its subscription and rebuilds the drawer list. A click that
-    // lands while the list is being rebuilt has no button left to release on and is lost (#350), so the next click waits
-    // for the page to show the write, and every click of this journey is confirmed by its first visible effect.
+    // The maintainer's own page learns of that write from its subscription: the thread is back in its list before it is acted on.
     await expect(card(member, rude)).toBeVisible();
     await expect(ui(member).locator(".content-head .count")).toHaveAttribute("aria-label", "3 active comments");
     // Deleting a comment is undoable for a moderator exactly as for an author: the write happens when the window ends.
-    await clickUntil(card(member, noisy).getByTestId("commentor-delete-btn"), ui(member).locator('.toast[role="status"]', { hasText: "Comment deleted." }));
+    await card(member, noisy).getByTestId("commentor-delete-btn").click();
     await expect.poll(async () => (await threadsAs(authorToken, scope)).map(thread => thread._id), { timeout: 20_000 }).not.toContain(noisyId);
-    // The landed write reaches this page as one more rebuild, which the reply's click may meet: it is retried like the first.
-    await clickUntil(card(member, spam).getByTestId("commentor-delete-reply-btn"), card(member, spam).getByText(replyText), "gone");
+    await card(member, spam).getByTestId("commentor-delete-reply-btn").click();
     await expect.poll(async () => (await threadsAs(authorToken, scope)).find(thread => thread._id === spamId)?.replies.map(reply => reply.body), { timeout: 20_000 }).toEqual([]);
     expect(replyText).toBeTruthy();
     // Editing stays the author's: a maintainer cannot put words in someone else's mouth.

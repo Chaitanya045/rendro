@@ -5093,7 +5093,8 @@
       "sources": [
         "src/commentor/commentor.ts",
         "src/commentor/parent-host.ts",
-        "src/repo-read/routes.ts"
+        "src/repo-read/routes.ts",
+        "src/commentor/press-guard.ts"
       ],
       "roles": [
         "anonymous",
@@ -5113,7 +5114,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-recovery.test.ts",
       "edges": [
@@ -5260,6 +5261,159 @@
               "file": "tests/commentor-recovery-ui.test.ts",
               "name": "restores the %s draft and operation ID in a new iframe widget",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E09",
+          "from": "Reader holds a press on a drawer button while a live update rebuilds the list",
+          "trigger": "Release the press",
+          "expected": "The click is delivered (the delete begins), then the newest state is shown, never an older one",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "keeps a drawer button pressed while the list is rebuilt, then shows the newest state",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E10",
+          "from": "Reader holds a press on a button of the open bubble while a live update arrives",
+          "trigger": "Release the press",
+          "expected": "The click is delivered (the thread resolves), then the update is shown",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "keeps a button of the open bubble pressed while the bubble is rebuilt",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E11",
+          "from": "Reader holds a press on a pin while a live update rebuilds the pins",
+          "trigger": "Release the press",
+          "expected": "The click is delivered (the bubble opens), then the new pin is shown",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "keeps a pin pressed while the pins are rebuilt, so releasing it opens its bubble",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E12",
+          "from": "Reader holds Space on a focused thread button while a live update arrives",
+          "trigger": "Release Space",
+          "expected": "The click is delivered (the thread archives), then the update is shown",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "keeps a focused button through a held Space, until it is released",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E13",
+          "from": "Reader presses outside the rebuilt regions, with a secondary button, or types a space in a field while a live update arrives",
+          "trigger": "The update arrives",
+          "expected": "It is shown at once; nothing is held",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "does not hold updates for a press outside the rebuilt regions, a secondary button, or a key that does not click",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E14",
+          "from": "Reader's press never ends (its release is lost) while a live update waits",
+          "trigger": "About two seconds pass",
+          "expected": "The update is shown anyway",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "does not let a press that never ends freeze updates",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E15",
+          "from": "Reader holds a press while a live update waits and the window loses focus",
+          "trigger": "Window blur",
+          "expected": "The waiting update is shown",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-press-browser.test.ts",
+              "name": "applies a held rebuild when the window loses focus mid-press",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E16",
+          "from": "A rebuild waits for a held press",
+          "trigger": "Release, a second press, the press cap, or a source not held",
+          "expected": "Only the newest rebuild runs, after the click's task, and never while a press is held",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/commentor-press-guard.test.ts",
+              "name": "holds a rebuild while a press is down and runs only the newest one on a later task after the release",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-119-E17",
+          "from": "Reader holds a press on a drawer button, then on a pin, while another write of theirs arrives through the real shell and Convex",
+          "trigger": "Release the press",
+          "expected": "The delete begins and the pin's bubble opens, then the new comment is shown",
+          "inventoryRefs": [
+            "UI-119"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-comment-live-press.spec.ts",
+              "name": "a click held while a live update rebuilds the list still acts, and the update follows",
+              "kind": "e2e"
             }
           ]
         }

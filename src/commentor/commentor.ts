@@ -1,3 +1,4 @@
+import { PressGuard } from "./press-guard";
 import { CommentWriteCooldown } from "./write-cooldown";
 import { commentErrorMessage, commentRetryAfter } from "./frame-errors";
 import { CommentOperationConflictError, editDraftKey } from "./operation-state";
@@ -432,6 +433,9 @@ class Commentor {
   private seenReplyIds = new Set<ReplyId>();
   private newThreadIds = new Set<ThreadId>();
   private newReplyIds = new Set<ReplyId>();
+  // What the next live rebuild must show that the state alone does not tell (#350): what arrived since the last one.
+  private livePending: { drawerOnly: boolean; newThreadIds: Set<ThreadId>; newReplyIds: Set<ReplyId>; incomingActive: number } | null = null;
+  private readonly press = new PressGuard();
   private subscriptionReady = false;
   private pendingDeletes = new PendingDeletionCoordinator<ThreadId>();
   private composerHasSubmitted = false;
@@ -613,6 +617,7 @@ class Commentor {
       if (e.key === "commentor-theme") this.applyTheme();
     });
     if (window.parent !== window) requestParentTheme(window.parent);
+    this.guardPresses();
     this.subscribe();
     this.wireTooltips();
     document.addEventListener("selectionchange", () =>
@@ -666,7 +671,7 @@ class Commentor {
       // before the first real page (including after a BFCache resubscribe).
       // Keep the current realtime view until that page arrives.
       if (pagination?.loading && incomingThreads.length === 0) {
-        this.renderDrawerList();
+        this.renderLive({ drawerOnly: true });
         return;
       }
       this.syncRecoveryDrafts();
@@ -688,24 +693,14 @@ class Commentor {
       // A comment deleted while it was being edited takes its editor with it.
       if (this.editing && !this.editedItem(threads, this.editing)) this.editing = null;
       suppressNew ||= wasLoadingMore || pagination?.loading === true;
-      const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
-        && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
-        ? this.root.activeElement
-        : null;
-      const activeThreadId = activeReply
-        ?.closest<HTMLElement>("[data-thread-id]")
-        ?.dataset.threadId;
-      const activeReplyInBubble = Boolean(activeReply?.closest(".bubble"));
-      const selectionStart = activeReply?.selectionStart ?? 0;
-      const selectionEnd = activeReply?.selectionEnd ?? 0;
-      this.newThreadIds = new Set(
+      const newThreadIds = new Set<ThreadId>(
         this.subscriptionReady && !suppressNew
           ? threads
               .filter((thread) => !this.seenThreadIds.has(thread._id))
               .map((thread) => thread._id)
           : [],
       );
-      this.newReplyIds = new Set(
+      const newReplyIds = new Set<ReplyId>(
         this.subscriptionReady && !suppressNew
           ? threads.flatMap((thread) =>
               thread.replies
@@ -716,7 +711,7 @@ class Commentor {
       );
       const incomingActive = threads.filter(
         (thread) =>
-          this.newThreadIds.has(thread._id) &&
+          newThreadIds.has(thread._id) &&
           !thread.resolved &&
           !thread.archived &&
           !this.pendingDeletes.has(thread._id),
@@ -730,32 +725,10 @@ class Commentor {
         if (threads.some((thread) => thread._id === threadId)) continue;
         this.pendingDeletes.acknowledge(threadId);
       }
-      this.renderPins();
-      this.renderDrawerList();
-      if (incomingActive > 0) this.announceNewComments(incomingActive);
-      this.refreshOpenBubble();
-      if (activeThreadId) {
-        requestAnimationFrame(() => {
-          const scope = activeReplyInBubble ? this.bubbleLayer : this.drawerList;
-          const replacement = Array.from(
-            scope.querySelectorAll<HTMLTextAreaElement>(
-              '[data-testid="commentor-reply-input"]',
-            ),
-          ).find(
-            (input) =>
-              input.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId ===
-              activeThreadId,
-          );
-          if (!replacement) return;
-          replacement.focus({ preventScroll: true });
-          replacement.setSelectionRange(selectionStart, selectionEnd);
-        });
-      }
+      this.renderLive({ newThreadIds, newReplyIds, incomingActive });
       if (this.subscriptionReady || pagination?.loading !== true) {
         this.subscriptionReady = true;
       }
-      this.newThreadIds.clear();
-      this.newReplyIds.clear();
     };
     const fail = (error: Error) => {
       console.error("[commentor] subscription error", error);
@@ -842,7 +815,7 @@ class Commentor {
           this.savingEdits.clear();
           this.markersLayer.replaceChildren();
         }
-        this.renderDrawerList();
+        this.renderLive({ drawerOnly: true });
         // Access changes only matter when they cross the guard, and the re-read must not
         // defer: a throttled or manually controlled frame schedule would leave a pending
         // rAF in selectionRaf, blocking scheduleSelectionAction and racing a hide timer.
@@ -858,6 +831,83 @@ class Commentor {
         }
       },
     );
+  }
+
+  // ── live rebuilds ──
+  /**
+   * A click needs its button to survive from press to release, but a live update rebuilds the drawer list, the pins and
+   * the open bubble. While the reader holds a press inside them (the pointer, or Space on a focused control), the
+   * rebuild waits for the release and runs after the click it produced (#350). The state a rebuild shows is read when
+   * it runs, so what is applied afterwards is always the newest.
+   */
+  private guardPresses(): void {
+    const inLive = (e: Event) => e.composedPath().some((node) => node === this.drawerBody || node === this.bubbleLayer || node === this.markersLayer);
+    this.root.addEventListener("pointerdown", (e) => {
+      // The secondary buttons open a menu rather than click, and their release may never reach the page.
+      if ((e as PointerEvent).button === 0 && inLive(e)) this.press.press("pointer");
+    }, true);
+    this.root.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === " " && !(e as KeyboardEvent).repeat && e.target instanceof HTMLButtonElement && inLive(e)) this.press.press("key");
+    }, true);
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) window.addEventListener(type, () => this.press.release("pointer"), true);
+    window.addEventListener("keyup", (e) => { if (e.key === " ") this.press.release("key"); }, true);
+    window.addEventListener("blur", () => { this.press.release("pointer"); this.press.release("key"); });
+  }
+
+  /** Rebuild what a live change shows: now, or once a press the reader holds on one of its controls has ended. */
+  private renderLive(change: { drawerOnly: true } | { newThreadIds: Set<ThreadId>; newReplyIds: Set<ReplyId>; incomingActive: number }): void {
+    const pending = this.livePending ??= { drawerOnly: true, newThreadIds: new Set(), newReplyIds: new Set(), incomingActive: 0 };
+    if ("newThreadIds" in change) {
+      pending.drawerOnly = false;
+      for (const id of change.newThreadIds) pending.newThreadIds.add(id);
+      for (const id of change.newReplyIds) pending.newReplyIds.add(id);
+      pending.incomingActive += change.incomingActive;
+    }
+    this.press.run(() => this.flushLive());
+  }
+
+  private flushLive(): void {
+    const pending = this.livePending!;
+    this.livePending = null;
+    if (pending.drawerOnly) {
+      this.renderDrawerList();
+      return;
+    }
+    const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
+      && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
+      ? this.root.activeElement
+      : null;
+    const activeThreadId = activeReply
+      ?.closest<HTMLElement>("[data-thread-id]")
+      ?.dataset.threadId;
+    const activeReplyInBubble = Boolean(activeReply?.closest(".bubble"));
+    const selectionStart = activeReply?.selectionStart ?? 0;
+    const selectionEnd = activeReply?.selectionEnd ?? 0;
+    this.newThreadIds = pending.newThreadIds;
+    this.newReplyIds = pending.newReplyIds;
+    this.renderPins();
+    this.renderDrawerList();
+    if (pending.incomingActive > 0) this.announceNewComments(pending.incomingActive);
+    this.refreshOpenBubble();
+    if (activeThreadId) {
+      requestAnimationFrame(() => {
+        const scope = activeReplyInBubble ? this.bubbleLayer : this.drawerList;
+        const replacement = Array.from(
+          scope.querySelectorAll<HTMLTextAreaElement>(
+            '[data-testid="commentor-reply-input"]',
+          ),
+        ).find(
+          (input) =>
+            input.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId ===
+            activeThreadId,
+        );
+        if (!replacement) return;
+        replacement.focus({ preventScroll: true });
+        replacement.setSelectionRange(selectionStart, selectionEnd);
+      });
+    }
+    this.newThreadIds.clear();
+    this.newReplyIds.clear();
   }
 
   // ── theme ──

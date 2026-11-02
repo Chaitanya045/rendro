@@ -306,6 +306,7 @@ subscribes to, and a forged request is the same call the UI would have made.
 | `repo-comment-journeys.spec.ts` | Delete with Undo inside its window; the Active, Resolved and History views; older threads and replies on demand, and a comment arriving while scrolled away |
 | `repo-comment-permissions.spec.ts` | An outsider refused a private repository's comments, anonymous readers of a public one; a writer over the comment limit (the post shows as sending, then returns with its draft) |
 | `repo-comment-moderation.spec.ts` | A maintainer (the member, given GitHub's maintain role through the control endpoint `/role/<role>` and the `member` webhook it sends) archives and deletes another reader's thread and reply; a reader with no role, write or triage is offered neither and refused when forging them; a role claimed in a request is ignored; editing stays the author's; a demotion removes the controls from the open page and refuses every later call (#259) |
+| `repo-comment-live-press.spec.ts` | A click held on a drawer button or a pin while another write of the same person arrives through the real shell and Convex: the release still acts (the delete begins, the bubble opens) and the update is shown after it (#350) |
 | `repo-comment-recovery.spec.ts` | A draft that survives signing out in another tab and returns after signing back in, never to another account; a revoked session noticed on focus |
 
 Timing. The widget's undo window, quota countdown and toast exits run on the page clock, which the tests install and
