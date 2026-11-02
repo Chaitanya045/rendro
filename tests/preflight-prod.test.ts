@@ -75,9 +75,12 @@ function cli(secrets = secretsSet(), convex: CliResult = { code: 0, stdout: CONV
   });
 }
 
-async function run(argv: string[], configs = wired(), runner = cli()) {
+/** A repository whose Better Auth is upgraded and whose audit ignores nothing (#349); tests override either. */
+const upgraded = { betterAuthVersion: () => "1.7.7" as string | null, auditIgnores: () => [] as string[] };
+
+async function run(argv: string[], configs = wired(), runner = cli(), gate: Partial<typeof upgraded> = {}) {
   const lines: string[] = [];
-  const code = await main(argv, { readConfig: (path) => configs[path]!, run: runner, log: (line) => lines.push(line) });
+  const code = await main(argv, { readConfig: (path) => configs[path]!, run: runner, log: (line) => lines.push(line), ...upgraded, ...gate });
   const text = lines.join("\n");
   /** The checklist line for `label` in the section whose heading mentions `worker`. */
   const line = (label: string, worker = "") => {
@@ -293,6 +296,42 @@ describe("production preflight, offline (#333)", () => {
   });
 });
 
+describe("production preflight waits for the Better Auth upgrade (#349)", () => {
+  it("passes once Better Auth is at the fixed release and the audit ignores nothing", async () => {
+    const { code, line } = await run([]);
+    expect(code).toBe(0);
+    expect(line("better-auth (dependency)")).toContain("ok        better-auth (dependency): installed 1.7.7");
+    expect(line("pnpm audit exceptions")).toContain("ok        pnpm audit exceptions: none");
+  });
+
+  it("blocks while the installed Better Auth is older than 1.7.7", async () => {
+    const { code, text, line, fixOf } = await run([], wired(), cli(), { betterAuthVersion: () => "1.6.23" });
+    expect(code).toBe(1);
+    expect(line("better-auth (dependency)")).toContain("MISSING   better-auth (dependency): installed 1.6.23; production needs >= 1.7.7");
+    expect(fixOf("better-auth (dependency)")).toContain("(#349)");
+    expect(text).toContain("1 required item missing, 7 to verify");
+  });
+
+  it("blocks while the audit ignores any advisory", async () => {
+    const { code, text, line } = await run([], wired(), cli(), { auditIgnores: () => ["GHSA-965c-763c-88jm", "GHSA-44jh-23m7-hpcf"] });
+    expect(code).toBe(1);
+    expect(line("pnpm audit exceptions")).toContain("MISSING   pnpm audit exceptions: ignored: GHSA-965c-763c-88jm, GHSA-44jh-23m7-hpcf; production launches with none");
+    expect(text).toContain("1 required item missing, 7 to verify");
+  });
+
+  it("counts both blockers, and --report still exits 0", async () => {
+    const gate = { betterAuthVersion: () => "1.6.23", auditIgnores: () => ["GHSA-965c-763c-88jm"] };
+    expect((await run([], wired(), cli(), gate)).text).toContain("2 required items missing, 7 to verify");
+    expect((await run(["--report"], wired(), cli(), gate)).code).toBe(0);
+  });
+
+  it("blocks when Better Auth is not installed", async () => {
+    const { code, line } = await run([], wired(), cli(), { betterAuthVersion: () => null });
+    expect(code).toBe(1);
+    expect(line("better-auth (dependency)")).toContain("not installed; production needs >= 1.7.7");
+  });
+});
+
 describe("production preflight, online (#333)", () => {
   it("diffs secret and env var names, and never prints a value", async () => {
     const runner = cli();
@@ -391,6 +430,9 @@ describe("preflight command", () => {
       expect(text).toContain("MISSING   INGEST_BUCKET (r2): ");
       expect(text).toContain("MISSING   REPO_SEARCH (d1): The search index");
       expect(text).toContain("MISSING   REPO_EPOCHS (kv): Revocation epochs, read by the serving Worker");
+      // The repository's own Better Auth and audit exceptions are checked (tests/audit-exceptions.test.ts pins their state).
+      expect(text).toMatch(/(MISSING|ok) +better-auth \(dependency\): (installed \d+\.\d+\.\d+|not installed)/);
+      expect(text).toMatch(/(MISSING|ok) +pnpm audit exceptions: /);
       expect(process.exitCode).toBe(0);
     } finally { process.argv = argv; process.exitCode = exitCode; }
   });
