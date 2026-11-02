@@ -88,6 +88,9 @@ test("a maintainer archives and deletes other readers' comments; a writer cannot
     // The author's open page follows, and the History view holds it.
     await expect.poll(async () => await ui(author.page).locator(".content-head .count").getAttribute("aria-label")).toBe("2 active comments");
     expect((await writeThread(await sessionToken(member), scope, "archive", rudeId, { archived: false })).ok).toBe(true);
+    // The maintainer's own page learns of that write from its subscription: the thread is back in its list before it is acted on.
+    await expect(card(member, rude)).toBeVisible();
+    await expect(ui(member).locator(".content-head .count")).toHaveAttribute("aria-label", "3 active comments");
     // Deleting a comment is undoable for a moderator exactly as for an author: the write happens when the window ends.
     await card(member, noisy).getByTestId("commentor-delete-btn").click();
     await expect.poll(async () => (await threadsAs(authorToken, scope)).map(thread => thread._id), { timeout: 20_000 }).not.toContain(noisyId);
