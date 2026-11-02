@@ -60,3 +60,7 @@ export const updateOne = guardedMutation(api.updateOne);
 export const updateMany = guardedMutation(api.updateMany);
 export const deleteOne = guardedMutation(api.deleteOne);
 export const deleteMany = guardedMutation(api.deleteMany);
+// Better Auth 1.7's atomic one-row operations (single-use verification tokens, counters).
+// Their selectors take the same guard as every other write.
+export const consumeOne = guardedMutation(api.consumeOne);
+export const incrementOne = guardedMutation(api.incrementOne);

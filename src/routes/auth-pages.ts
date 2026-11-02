@@ -39,7 +39,7 @@ export function signInErrorMessage(code: string, email = true): string {
     case "unable_to_link_account":
     case "account_not_linked":
     case "account_already_linked_to_different_user":
-    case "email_doesn't_match":
+    case "email_does_not_match":
     case "email_not_verified":
       return "We couldn't connect that account. Sign in with your existing method and verify your email first.";
     default:

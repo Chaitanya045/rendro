@@ -64,7 +64,7 @@ describe("auth error redirects through the Worker", () => {
     ["unable_to_link_account", "We couldn&#39;t connect that account."],
     ["account_not_linked", "We couldn&#39;t connect that account."],
     ["account_already_linked_to_different_user", "We couldn&#39;t connect that account."],
-    ["email_doesn't_match", "We couldn&#39;t connect that account."],
+    ["email_does_not_match", "We couldn&#39;t connect that account."],
     ["EMAIL_NOT_VERIFIED", "We couldn&#39;t connect that account."],
     ["unexpected_error", "We couldn&#39;t complete sign-in."],
     ["<script>alert(1)</script>", "We couldn&#39;t complete sign-in."],
