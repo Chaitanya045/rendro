@@ -18,7 +18,7 @@ test.afterEach(({ cspViolations }) => {
 
 /** Run `write`, then resolve once the widget's document has handled the update that carries `body`. */
 async function updateThrough(page: Page, body: string, write: () => Promise<unknown>) {
-  const frame = (await page.locator("#content-frame").elementHandle().then(handle => handle!.contentFrame()))!;
+  const frame = (await page.locator("#content-frame").elementHandle().then(handle => handle.contentFrame()))!;
   const delivered = frame.evaluate(needle => new Promise<void>(resolve => {
     addEventListener("message", function seen(event: MessageEvent) {
       const threads = (event.data as { threads?: Array<{ body: string }> } | null)?.threads;
