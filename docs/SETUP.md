@@ -99,6 +99,8 @@ pnpm preflight:prod --online   # owner only, with production credentials: also t
 
 Production is the top level of each wrangler file, as `pnpm run deploy` deploys it. The development Workers (`rendro-dev`, `rendro-ingest-dev`, `rendro-control-dev`) are each file's `[env.development]`, which the tests load. The top levels of `wrangler.ingest.toml` and `wrangler.control.toml` are production skeletons (#336): name, entry, Durable Objects, queues and cron, but no R2 bucket, D1 database or KV namespace. Until those are created and bound, the preflight reports them missing.
 
+The preflight also blocks, in its own "Dependencies" section, while the installed Better Auth is older than 1.7.7 or `pnpm audit` ignores any advisory (#349). The audit exception for four Better Auth advisories (features Rendro does not enable) lives in `pnpm-workspace.yaml` under `auditConfig.ignoreGhsas`; it is dropped when the upgrade lands, and `tests/audit-exceptions.test.ts` fails if it outlives it, lists any other ID, or covers a plugin that is enabled.
+
 Each line has a status:
 
 | Status | Meaning |

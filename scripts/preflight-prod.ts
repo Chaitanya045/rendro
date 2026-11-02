@@ -8,11 +8,14 @@
  *                                   (`wrangler secret list`) and the Convex production env var names
  *                                   (`convex env list --prod`). Owner-run, with the owner's credentials.
  *
+ * It also blocks while the installed Better Auth is older than 1.7.7 or `pnpm audit` has any ignored advisory (#349).
+ *
  * Only names are ever printed. CLI output is parsed for names, and values are dropped before anything
  * is logged; output that cannot be parsed is reported by its line count, never echoed.
  */
 import { execFile } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { FIXED_VERSION, isBeforeFix, readAuditIgnores, readInstalledBetterAuth } from "./better-auth-exceptions";
 import { convexDeployable, workers, type Binding, type DeployableKey, type Setting, type WorkerDeployable, type Wiring } from "./production-manifest";
 
 export type Raw = Record<string, unknown>;
@@ -24,6 +27,10 @@ export interface Dependencies {
   readConfig(path: string): Raw;
   run(command: string, args: string[]): Promise<CliResult>;
   log(line: string): void;
+  /** The installed Better Auth version, or null when it is not installed. */
+  betterAuthVersion(): string | null;
+  /** The advisories `pnpm audit` is told to ignore. */
+  auditIgnores(): string[];
 }
 
 const KV_ID = /^[0-9a-f]{32}$/;
@@ -335,6 +342,24 @@ async function onlineConvexLines(deps: Dependencies): Promise<Line[]> {
   return lines;
 }
 
+/**
+ * Production waits for Better Auth >= 1.7.7 (#349): until then the audit carries a narrow exception (#347),
+ * and an exception is a debt, not a pass.
+ */
+function dependencyLines(deps: Dependencies): Line[] {
+  const version = deps.betterAuthVersion();
+  const ignores = deps.auditIgnores();
+  const fix = `upgrade better-auth to >= ${FIXED_VERSION} once @convex-dev/better-auth supports it (#349), then remove auditConfig.ignoreGhsas from pnpm-workspace.yaml`;
+  return [
+    isBeforeFix(version)
+      ? { status: "missing", label: "better-auth (dependency)", detail: `${version === null ? "not installed" : `installed ${version}`}; production needs >= ${FIXED_VERSION}`, fix }
+      : { status: "ok", label: "better-auth (dependency)", detail: `installed ${version}` },
+    ignores.length
+      ? { status: "missing", label: "pnpm audit exceptions", detail: `ignored: ${ignores.join(", ")}; production launches with none`, fix }
+      : { status: "ok", label: "pnpm audit exceptions", detail: "none" },
+  ];
+}
+
 const MARK: Record<Status, string> = { ok: "ok      ", missing: "MISSING ", verify: "VERIFY  ", optional: "optional", unused: "unused  " };
 
 function print(deps: Dependencies, heading: string, lines: Line[]): void {
@@ -372,6 +397,9 @@ export async function main(argv: string[], deps: Dependencies): Promise<number> 
       : { status: "verify", label: setting.name, detail: setting.purpose, fix: `pnpm exec convex env set --prod ${setting.name} <value> (checked by --online)` });
   print(deps, `${convexDeployable.title} (production deployment): env vars, deployed by \`pnpm exec convex deploy\``, convex);
   all.push(...convex);
+  const dependencies = dependencyLines(deps);
+  print(deps, "Dependencies: the audit and Better Auth (#349)", dependencies);
+  all.push(...dependencies);
   const missing = all.filter((line) => line.status === "missing").length;
   const verify = all.filter((line) => line.status === "verify").length;
   deps.log("");
@@ -394,6 +422,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     readConfig: (path) => experimental_readRawConfig({ config: path }).rawConfig as Raw,
     run: runCommand,
     log: (line) => console.log(line),
+    betterAuthVersion: () => readInstalledBetterAuth(),
+    auditIgnores: () => readAuditIgnores(),
   };
   process.exitCode = await main(process.argv.slice(2), deps);
 }
