@@ -31,7 +31,7 @@ async function fixture(rememberMe: boolean) {
   rateLimiterTest.register(backend);
   const auth = betterAuth(createAuthOptions({ runQuery: backend.query, runMutation: backend.mutation } as never));
   const context = await auth.$context;
-  const user = await context.internalAdapter.createUser({ name: "Reader", email: "lifetime@example.test", emailVerified: true }, { method: "email-password" });
+  const user = await context.internalAdapter.createUser({ name: "Reader", email: "lifetime@example.test", emailVerified: true });
   await context.internalAdapter.createAccount({ userId: user.id, accountId: user.id, providerId: "credential", password: await hashPassword(password) });
   // Only substitute the network transport; retain production auth, adapter,
   // limiter, Worker proxy, middleware and cache behavior.
@@ -301,7 +301,7 @@ it("hooks every Better Auth endpoint that can read a session", async () => {
 
   // Exercise every HTTP endpoint with a fresh non-remembered session and an
   // attacking marker. Exempt endpoints must not resolve or refresh it at all.
-  const user = await context.internalAdapter.createUser({ name: "Sweep", email: "sweep@example.test", emailVerified: true }, { method: "email-password" });
+  const user = await context.internalAdapter.createUser({ name: "Sweep", email: "sweep@example.test", emailVerified: true });
   for (const { path, options } of all.filter(e => e.path && !e.options.metadata?.SERVER_ONLY)) {
     // The Convex adapter stores epoch milliseconds plus the lifetime field.
     const session = await context.internalAdapter.createSession(user.id, true) as unknown as { token: string; createdAt: number; expiresAt: number; rememberMe: boolean };
@@ -322,10 +322,7 @@ it("hooks every Better Auth endpoint that can read a session", async () => {
       expect(cookie.replace(/; Max-Age=0(?=;|$)/i, ""), path).not.toMatch(/; (?:Max-Age|Expires)=/i);
     }
     if (sessionlessAuthPaths.has(path)) {
-      // Better Auth 1.7's sign-out reads the session itself, once, to find the providers it must end the login at.
-      // That read is its own: the hook above never runs for it (the matcher), and nothing may be written.
-      if (path === "/sign-out") expect(find, path).toHaveBeenCalledTimes(1);
-      else expect(find, path).not.toHaveBeenCalled();
+      expect(find, path).not.toHaveBeenCalled();
       expect(update, path).not.toHaveBeenCalled();
     }
     vi.restoreAllMocks();

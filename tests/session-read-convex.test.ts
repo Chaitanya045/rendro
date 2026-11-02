@@ -27,7 +27,7 @@ async function fixture(extra: BetterAuthPlugin[] = []) {
   } as never);
   const auth = betterAuth({ ...options, plugins: [...options.plugins, ...extra] });
   const context = await auth.$context;
-  const user = await context.internalAdapter.createUser({ name: "Reader", email: "reader@example.test", emailVerified: true }, { method: "email-password" });
+  const user = await context.internalAdapter.createUser({ name: "Reader", email: "reader@example.test", emailVerified: true });
   const session = await context.internalAdapter.createSession(user.id);
   const cookie = (token: string) => `better-auth.session_token=${encodeURIComponent(`${token}.${createHmac("sha256", process.env.AUTH_SECRET!).update(token).digest("base64")}`)}`;
   const request = (token = session.token) => auth.handler(new Request(`${baseURL}/api/auth/get-session`, { headers: { cookie: cookie(token) } }));

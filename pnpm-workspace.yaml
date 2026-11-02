@@ -1,2 +1,16 @@
 onlyBuiltDependencies:
   - esbuild
+
+# Audit exceptions, removed once better-auth >= 1.7.7 is installed (tests/audit-exceptions.test.ts fails
+# if they outlive the upgrade, and `pnpm preflight:prod` blocks while any is listed; tracked in #349).
+# Each advisory concerns a feature Rendro does not enable:
+#   GHSA-965c-763c-88jm  the Magic Link plugin (not used)
+#   GHSA-r4xp-prcw-77qf  the OAuth Proxy plugin (not used)
+#   GHSA-q84f-53jg-9ppm  the device authorization plugin (not used)
+#   GHSA-44jh-23m7-hpcf  the drizzle/kysely adapters' PostgreSQL rate limits (Rendro uses the Convex adapter)
+auditConfig:
+  ignoreGhsas:
+    - GHSA-965c-763c-88jm
+    - GHSA-r4xp-prcw-77qf
+    - GHSA-q84f-53jg-9ppm
+    - GHSA-44jh-23m7-hpcf

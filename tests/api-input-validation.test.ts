@@ -22,7 +22,7 @@ async function fixture() {
   t.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   rateLimiterTest.register(t);
   const context = await betterAuth(createAuthOptions({ runQuery: t.query, runMutation: t.mutation } as never)).$context;
-  const user = await context.internalAdapter.createUser({ name: "owner", email: "owner@example.test", emailVerified: true }, { method: "email-password" });
+  const user = await context.internalAdapter.createUser({ name: "owner", email: "owner@example.test", emailVerified: true });
   const { token } = await context.internalAdapter.createSession(user.id);
   const cookie = `better-auth.session_token=${encodeURIComponent(`${token}.${createHmac("sha256", process.env.AUTH_SECRET!).update(token).digest("base64")}`)}`;
   vi.stubGlobal("fetch", vi.fn(async (input: string, init: RequestInit) => {

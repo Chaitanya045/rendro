@@ -1,5 +1,4 @@
 import type { DBAdapter, DBTransactionAdapter } from "better-auth";
-import { github as githubProvider } from "better-auth/social-providers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   emailSignInEnabled, githubHandOff, githubSignInConfig, githubUserInfo, handOffCapture, withoutOAuthTokens, type HandOffCapture,
@@ -73,12 +72,7 @@ describe("GitHub user info (#338)", () => {
   it("uses the profile's name and avatar, and only a verified address", async () => {
     const capture = handOffCapture();
     github({ id: 9, login: "octo", name: "Octo Cat", avatar_url: "https://avatars.example/9" }, [{ email: "x@example.test", verified: false, primary: true }, { email: "y@example.test", verified: true, primary: false }, "junk", null]);
-    const info = await githubUserInfo(capture)({ accessToken: "t" });
-    expect(info).toMatchObject({ user: { name: "Octo Cat", email: "y@example.test", image: "https://avatars.example/9", emailVerified: true } });
-    expect(info?.user).not.toHaveProperty("id");
-    // Better Auth 1.7 keys the account on the GitHub provider's subject: the profile's numeric id, as stored before 1.7.
-    const provider = githubProvider({ clientId: "c", clientSecret: "s" });
-    expect(provider.accountSubject({ tokens: { accessToken: "t" }, profile: info!.data })).toBe(9);
+    expect(await githubUserInfo(capture)({ accessToken: "t" })).toMatchObject({ user: { id: "9", name: "Octo Cat", email: "y@example.test", image: "https://avatars.example/9", emailVerified: true } });
     expect(capture.identity).toEqual({ githubId: 9, login: "octo" });
     github({ id: 9, login: "octo", name: "  " }, { message: "not a list" });
     expect(await githubUserInfo(capture)({ accessToken: "t" })).toMatchObject({ user: { name: "octo", email: undefined, image: undefined, emailVerified: false } });
@@ -152,8 +146,7 @@ describe("no OAuth token is stored (#338)", () => {
 describe("the hand-off plugin (#338)", () => {
   const secret = process.env.CONVEX_INTERNAL_SECRET as string;
   const ready = (): HandOffCapture => ({ identity: { githubId: 7, login: "octo" }, tokens: { accessToken: "ghu_a", accessTokenExpiresAt: null, refreshToken: null, refreshTokenExpiresAt: null } });
-  const findAccountByKey = vi.fn((_key: { providerId: string; accountId: string }) => Promise.resolve<{ userId: string } | null>(null));
-  const context = (account: { userId: string } | null) => ({ internalAdapter: { findAccountByKey: findAccountByKey.mockImplementation(() => Promise.resolve(account)) } }) as never;
+  const context = (account: { userId: string } | null) => ({ internalAdapter: { findAccountByProviderId: vi.fn(() => Promise.resolve(account)) } }) as never;
   const respond = (capture: HandOffCapture, account: { userId: string } | null, key: { secret?: string } = { secret }) =>
     githubHandOff(capture, key.secret).onResponse!(new Response("body", { status: 302, statusText: "Found", headers: { location: "/home" } }), context(account));
 
@@ -166,7 +159,6 @@ describe("the hand-off plugin (#338)", () => {
     expect(await response.text()).toBe("body");
     expect(await openHandOff(secret, response.headers.get(GITHUB_HAND_OFF_HEADER) as string)).toEqual({ userId: "user-7", githubId: 7, login: "octo", tokens: ready().tokens });
     expect(capture).toEqual(handOffCapture());
-    expect(findAccountByKey).toHaveBeenCalledWith({ providerId: "github", accountId: "7" });
   });
 
   it("hands nothing over without tokens, an identity, the account row or the secret", async () => {

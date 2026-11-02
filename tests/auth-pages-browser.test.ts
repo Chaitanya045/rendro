@@ -88,7 +88,7 @@ it('explains each OAuth callback failure with fixed recovery copy and keeps the 
     ['unable_to_link_account', /couldn't connect that account/],
     ['account_not_linked', /couldn't connect that account/],
     ['account_already_linked_to_different_user', /couldn't connect that account/],
-    ["email_does_not_match", /couldn't connect that account/],
+    ["email_doesn't_match", /couldn't connect that account/],
     ['email_not_verified', /verify your email/],
     ['ACCESS_DENIED', /was canceled/],
     ['server_error', /couldn't complete sign-in\. Please try again or use your email and password/],

@@ -134,18 +134,6 @@ function authErrorLocation(url: URL): string {
 }
 
 /**
- * Whether one of the signed-in reader's accounts is their GitHub account, from Better Auth's own account list (it names
- * accounts by row ID): `undefined` when the list could not be read, so the caller fails closed.
- */
-async function isGitHubAccount(request: Request, accountId: string): Promise<boolean | undefined> {
-  const target = `${CONVEX_SITE_URL}/api/auth/list-accounts`;
-  const response = await backendFetch(target, { method: "GET", headers: await proxiedHeaders(request, target, "GET"), redirect: "manual" }, "proxyConvexRequest", cookieSite(request.url));
-  const accounts: unknown = response.ok ? await response.json().catch(() => undefined) : undefined;
-  if (!Array.isArray(accounts)) return undefined;
-  return accounts.some((entry: { id?: unknown; providerId?: unknown } | null) => entry?.id === accountId && entry.providerId === "github");
-}
-
-/**
  * GitHub's account hand-overs (#338), where this Worker binds the control Worker: the callback's
  * sealed hand-off is linked, and an unlink of the GitHub account first drops its tokens there.
  */
@@ -157,18 +145,14 @@ function githubHooks(request: Request, path: string, repoAccess: Fetcher | null)
   if (path !== "/api/auth/unlink-account" || request.method !== "POST") return {};
   return {
     async before(body) {
-      let accountId: unknown;
-      // A POST always carries a body here; anything but a JSON object names no account.
-      try { accountId = (JSON.parse(String(body)) as { accountId?: unknown } | null)?.accountId; } catch { return null; }
-      if (typeof accountId !== "string") return null;
+      let providerId: unknown;
+      // A POST always carries a body here; anything but a JSON object names no provider.
+      try { providerId = (JSON.parse(String(body)) as { providerId?: unknown } | null)?.providerId; } catch { return null; }
+      if (providerId !== "github") return null;
       // Convex authorizes the unlink itself; this only names whose tokens to drop first.
       const viewer = await sessionViewer(request);
       if (viewer.kind === "anonymous") return null;
-      if (viewer.kind === "user") {
-        const github = await isGitHubAccount(request, accountId);
-        if (github === false) return null;
-        if (github && await unlinkGitHubAccount(repoAccess, viewer.id)) return null;
-      }
+      if (viewer.kind === "user" && await unlinkGitHubAccount(repoAccess, viewer.id)) return null;
       return Response.json({ error: "GitHub could not be disconnected. Please try again." }, { status: 503, headers: { "Retry-After": "5" } });
     },
   };

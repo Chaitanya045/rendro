@@ -36,7 +36,7 @@ async function fixture(rememberMe: boolean, origin = secureOrigin) {
   rateLimiterTest.register(backend);
   const auth = betterAuth(createAuthOptions({ runQuery: backend.query, runMutation: backend.mutation } as never));
   const context = await auth.$context;
-  const user = await context.internalAdapter.createUser({ name: "Reader", email: "cookies@example.test", emailVerified: true }, { method: "email-password" });
+  const user = await context.internalAdapter.createUser({ name: "Reader", email: "cookies@example.test", emailVerified: true });
   await context.internalAdapter.createAccount({ userId: user.id, accountId: user.id, providerId: "credential", password: await hashPassword(password) });
   // Only the network transport is substituted: production auth options, adapter,
   // Worker proxy, session middleware and cache all run for real.
@@ -156,7 +156,7 @@ describe.each([["retired __Secure-", "__Secure-better-auth."], ["unprefixed", "b
 
   it.each(["before", "after"])("keeps the current session when such a cookie of another session comes %s it", async position => {
     const f = await fixture(true);
-    const stranger = await f.context.internalAdapter.createUser({ name: "Other", email: "other@example.test", emailVerified: true }, { method: "email-password" });
+    const stranger = await f.context.internalAdapter.createUser({ name: "Other", email: "other@example.test", emailVerified: true });
     const otherSession = await f.context.internalAdapter.createSession(stranger.id);
     const planted = `${other}session_token=${encodeURIComponent(`${otherSession.token}.${await signature(f, otherSession.token)}`)}`;
     const currentPairs = f.cookies.map(pair).join("; ");
