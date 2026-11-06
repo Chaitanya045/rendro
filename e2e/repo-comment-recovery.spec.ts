@@ -2,14 +2,14 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./actor-fixtures";
 import { ageRecord, login, session, signout } from "./auth-helpers";
 import { password } from "./seed";
-import { journeyDoc, open, pin, publicThreads, repos, startComment, storedDrafts, ui } from "./comment-helpers";
+import { journeyDoc, open, pin, commentThreads, repos, sessionToken, startComment, storedDrafts, ui } from "./comment-helpers";
 import { desktop } from "./shell-helpers";
 
 /**
  * Losing the session under a comment on a repository doc (#302, ported from the project-document recovery spec #286
  * removed). The shell owns the realtime connection and the drafts (sessionStorage, bound to the signed-in person); the
- * sandboxed widget holds nothing it could keep across a reload. The repository is public, so a reader who loses the
- * session keeps reading it and its comments, and only writing ends.
+ * sandboxed widget holds nothing it could keep across a reload. The repository is private (comments exist only there), so
+ * these readers are GitHub readers of it, and a second reader's session reads the server's state meanwhile.
  */
 test.use({ viewport: desktop });
 
@@ -32,12 +32,15 @@ async function writingEnded(page: Page) {
   await expect(ui(page).getByRole("heading", { name: "Journey", exact: true })).toBeVisible();
 }
 
-test("a draft survives signing out in another tab and returns after signing back in, but never appears for another account", async ({ actor }) => {
+test("a draft survives signing out in another tab and returns after signing back in, but never appears for another account", async ({ reader }) => {
   test.setTimeout(240_000);
   const { comments } = repos();
   const doc = await journeyDoc("session");
-  const owner = await actor("session");
-  const other = await actor("someone");
+  const owner = await reader("session");
+  const other = await reader("someone");
+  const observer = await reader("observer");
+  await open(observer.page, comments, doc.path, doc.commit);
+  const stored = async () => (await commentThreads(await sessionToken(observer.page), doc.path)).map(thread => thread.body);
   const me = ui(owner.page);
   const textarea = me.getByTestId("commentor-composer-textarea");
   await open(owner.page, comments, doc.path, doc.commit);
@@ -53,7 +56,7 @@ test("a draft survives signing out in another tab and returns after signing back
   await tab.close();
   await writingEnded(owner.page);
   expect(await storedDrafts(owner.page)).toEqual(["Unsent thought"]);
-  expect(await publicThreads(doc.path)).toEqual([]);
+  expect(await stored()).toEqual([]);
 
   // Signing back in as the same person returns to the page with the composer, the same text on the same quote.
   await login(owner.page, owner.email, password, true, pageUrl(doc));
@@ -63,7 +66,7 @@ test("a draft survives signing out in another tab and returns after signing back
   await me.getByTestId("commentor-composer-post").click();
   await expect(me.getByTestId("commentor-composer")).toHaveCount(0);
   await expect(pin(owner.page, "Unsent thought")).toBeVisible();
-  await expect.poll(async () => (await publicThreads(doc.path)).map(thread => thread.body)).toEqual(["Unsent thought"]);
+  await expect.poll(stored).toEqual(["Unsent thought"]);
   await expect.poll(() => storedDrafts(owner.page)).toEqual([]);
 
   // A second draft, then a different account signs in on the same tab: the first person's draft is gone for good.
@@ -85,11 +88,13 @@ test("a draft survives signing out in another tab and returns after signing back
   expect(await me.locator("body").innerText()).not.toContain("Private to the owner");
 });
 
-test("a revoked session is noticed when the page regains focus, and the draft returns once the person signs in again", async ({ actor }) => {
+test("a revoked session is noticed when the page regains focus, and the draft returns once the person signs in again", async ({ reader }) => {
   test.setTimeout(240_000);
   const { comments } = repos();
   const doc = await journeyDoc("revoked");
-  const owner = await actor("revoked");
+  const owner = await reader("revoked");
+  const observer = await reader("observer");
+  await open(observer.page, comments, doc.path, doc.commit);
   const me = ui(owner.page);
   const textarea = me.getByTestId("commentor-composer-textarea");
   await open(owner.page, comments, doc.path, doc.commit);
@@ -111,5 +116,5 @@ test("a revoked session is noticed when the page regains focus, and the draft re
   await expect(textarea).toHaveValue("Written as the session expired");
   await me.getByTestId("commentor-composer-post").click();
   await expect(me.getByTestId("commentor-composer")).toHaveCount(0);
-  await expect.poll(async () => (await publicThreads(doc.path)).map(thread => thread.body)).toEqual(["Written as the session expired"]);
+  await expect.poll(async () => (await commentThreads(await sessionToken(observer.page), doc.path)).map(thread => thread.body)).toEqual(["Written as the session expired"]);
 });

@@ -123,6 +123,6 @@ describe("sign-out with the real Better Auth handler", () => {
     for (const call of [
       () => caller.mutation(api.repoComments.addReply, { ...f.scope, threadId: f.threadId, body: "Denied" }),
       () => caller.mutation(api.repoComments.createThread, { ...f.scope, body: "Denied", anchor: repoAnchor() }),
-    ]) await expect(call()).rejects.toMatchObject({ data: { code: "unauthenticated" } });
+    ]) await expect(call()).rejects.toMatchObject({ data: { code: "not_found" } });
   });
 });

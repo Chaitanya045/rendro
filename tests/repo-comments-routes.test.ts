@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "@/worker";
 import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import { COMMENTOR_STYLES } from "@/commentor/styles";
-import { clearCommentGrantMemory, commentAccess, convexCommentGrants, convexCommentSnapshots, type CommentGrants } from "@/repo-read/comments";
+import { clearCommentGrantMemory, commentAccess, commentReader, convexCommentGrants, convexCommentSnapshots, type CommentGrants } from "@/repo-read/comments";
 import { CAPABILITY_TTL_SECONDS } from "@/repo-read/authorize";
 import { issueGrant } from "@/repo-read/grant";
 import { parseRepoPath } from "@/repo-read/paths";
@@ -84,43 +84,69 @@ function expectPlainNotFound(response: Response) {
   expect(response.headers.get("Retry-After")).toBeNull();
 }
 
-describe("the repository shell carries the one comments connection", () => {
-  it.each([["public", pub, publicRepo.id], ["private", priv, privateRepo.id]])("configures comments in the %s shell", async (_kind, base, repoId) => {
-    const response = await request(base, { headers: { cookie: sessions.reader } });
+describe("the repository shell carries the one comments connection, for private repositories only (#353)", () => {
+  it("configures comments in a private shell", async () => {
+    const response = await request(priv, { headers: { cookie: sessions.reader } });
     const html = await response.text();
     const config = /window\.RENDRO_REPO_COMMENT_CONFIG=(\{[^;]+\});/.exec(html)?.[1];
-    expect(JSON.parse(config ?? "null")).toEqual({ repoId, accessUrl: `${base}/comment-access`, convexUrl: process.env.CONVEX_URL, documentPath: "docs/index.md" });
+    expect(JSON.parse(config ?? "null")).toEqual({ repoId: privateRepo.id, accessUrl: `${priv}/comment-access`, convexUrl: process.env.CONVEX_URL, documentPath: "docs/index.md" });
     expect(html).toContain(`src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"`);
+  });
+
+  it("gives a public shell no comment configuration and no comments script", async () => {
+    const response = await request(pub, { headers: { cookie: sessions.reader } });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain("RENDRO_REPO_COMMENT_CONFIG");
+    expect(html).not.toContain("commentor-parent.js");
+    expect(html).not.toContain("comment-access");
   });
 
   it("allows the widget's one stylesheet in frames by hash, never 'unsafe-inline'", async () => {
     const { createHash } = await import("node:crypto");
     expect(COMMENTOR_STYLE_HASH).toBe(`'sha256-${createHash("sha256").update(COMMENTOR_STYLES).digest("base64")}'`);
-    const frame = await request(`${pub}/@${fixture.commits.public}/files/docs/index.md`);
+    const frame = await request(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { headers: { cookie: sessions.reader } });
     expect(frame.headers.get("Content-Security-Policy")).not.toContain("unsafe-inline");
     expect(frame.headers.get("Content-Security-Policy")).not.toContain("connect-src");
   });
 
+  it("puts the widget in a private frame, with the repository and page it shows", async () => {
+    const frame = await request(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { headers: { cookie: sessions.reader } });
+    const html = await frame.text();
+    expect(html).toContain("commentor.js");
+    expect(html).toContain(`&quot;repoId&quot;:${privateRepo.id}`);
+  });
+
+  it("gives a public frame no widget and no configuration", async () => {
+    const frame = await request(`${pub}/@${fixture.commits.public}/files/docs/index.md`);
+    expect(frame.status).toBe(200);
+    const html = await frame.text();
+    expect(html).not.toContain("commentor.js");
+    expect(html).not.toContain("data-commentor-config");
+  });
+
   it("gives a page ingest could not render no widget", async () => {
-    const frame = await request(`${pub}/@${fixture.commits.public}/files/docs/huge.md`);
+    const frame = await request(`${priv}/@${fixture.commits.private}/files/docs/huge.md`, { headers: { cookie: sessions.reader } });
     expect(await frame.text()).not.toContain("commentor.js");
   });
 });
 
 describe("comment access mirrors read access", () => {
-  it("grants anyone a public repository's comments, once per isolate while the grant is fresh", async () => {
-    const before = Date.now();
-    const response = await access(pub);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(response.headers.getSetCookie()).toEqual([]);
-    const body = await response.json() as { repoId: number; private: boolean; expiresAt: number };
-    expect(body).toEqual({ repoId: publicRepo.id, private: false, expiresAt: expect.any(Number) });
-    expect(body.expiresAt - before).toBeLessThanOrEqual(60_000 + 50);
-    expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 0, expiresAt: body.expiresAt }]);
-    // A signed-in reader of a public repository holds the same public grant.
-    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
-    expect(grants).toHaveLength(1);
+  it("is the read path's plain 404 for a public repository, and calls Convex and the control Worker for nothing", async () => {
+    for (const headers of [{}, { cookie: sessions.reader }, { cookie: sessions.outsider }] as Array<Record<string, string>>) {
+      for (const query of ["", "?path=docs%2Fguide.md"]) {
+        const response = await access(pub, headers, query);
+        expectPlainNotFound(response);
+        expect(await response.json()).toEqual({ error: "Not found" });
+        expect(response.headers.getSetCookie()).toEqual([]);
+      }
+    }
+    fixture.access.moderate(users.reader, publicRepo.id, "admin");
+    expectPlainNotFound(await access(pub, { cookie: sessions.reader }, "?path=docs%2Fguide.md"));
+    expect(grants).toEqual([]);
+    expect(moderatorGrants).toEqual([]);
+    expect(snapshots).toEqual([]);
+    expect(fixture.access.calls.moderation).toEqual([]);
   });
 
   it("grants a private repository's comments to its reader only, at the epoch the read path checked", async () => {
@@ -130,7 +156,7 @@ describe("comment access mirrors read access", () => {
     const granted = await access(priv, { cookie: sessions.reader });
     expect(granted.status).toBe(200);
     const body = await granted.json() as { expiresAt: number };
-    expect(body).toEqual({ repoId: privateRepo.id, private: true, expiresAt: expect.any(Number) });
+    expect(body).toEqual({ repoId: privateRepo.id, expiresAt: expect.any(Number) });
     expect(body.expiresAt - Date.now()).toBeLessThanOrEqual(CAPABILITY_TTL_SECONDS * 1000);
     expect(grants).toEqual([{ repoId: privateRepo.id, userId: users.reader, epoch: 42, expiresAt: body.expiresAt }]);
     // The capability cookie answers the next request: no session lookup, no permission source, no second write.
@@ -152,18 +178,9 @@ describe("comment access mirrors read access", () => {
     expect(grants.at(-1)?.expiresAt).toBeLessThanOrEqual(cookieExpiry);
   });
 
-  it("decides again when the memory or cookie behind a grant would end before the shell's next renewal", async () => {
+  it("decides again when the cookie behind a grant would end before the shell's next renewal", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    expect((await access(pub)).status).toBe(200);
     const asked = () => fixture.access.calls.authorize.length;
-    const before = asked();
-    // 40 s into the isolate's one-minute public memory: a page view would still use it; comment access asks again.
-    vi.setSystemTime(Date.now() + 40_000);
-    clearCommentGrantMemory();
-    const renewed = await access(pub);
-    expect(asked()).toBe(before + 1);
-    expect((await renewed.json() as { expiresAt: number }).expiresAt - Date.now()).toBeGreaterThan(55_000);
-
     const granted = await access(priv, { cookie: sessions.reader });
     const cookie = `${sessions.reader}; ${capability(granted)}`;
     // 24 s left on the capability cookie: decided again (session, epoch, source), with a fresh cookie and a full grant.
@@ -185,12 +202,12 @@ describe("comment access mirrors read access", () => {
 
   it("answers like a missing repository when Convex refuses the grant (revoked or removed meanwhile)", async () => {
     convex.answer = () => Response.json({ status: "success", value: { granted: false } });
-    expectPlainNotFound(await access(pub));
+    expectPlainNotFound(await access(priv, { cookie: sessions.reader }));
   });
 
   it("is a retryable 503 when Convex or the permission source cannot answer", async () => {
     convex.answer = () => new Response("down", { status: 503 });
-    const response = await access(pub);
+    const response = await access(priv, { cookie: sessions.reader });
     expect(response.status).toBe(503);
     expect(response.headers.get("Retry-After")).toBe("1");
     fixture.access.unavailable = true;
@@ -200,56 +217,35 @@ describe("comment access mirrors read access", () => {
   });
 
   it("answers only a same-origin POST, and only at the repository's own URL", async () => {
+    const reader = { cookie: sessions.reader };
     for (const response of [
-      await request(`${pub}/comment-access`),
-      await access(pub, { Origin: "https://evil.test" }),
-      await access(pub, { "Sec-Fetch-Site": "cross-site" }),
-      await request(`${pub}/comment-access`, { method: "POST" }),
-      await request(`${pub}/@${fixture.commits.public}/comment-access`, { method: "POST", headers: { Origin: ORIGIN } }),
-      await request(`${pub}/~main/comment-access`, { method: "POST", headers: { Origin: ORIGIN } }),
-      await request(`${pub}/files/docs/index.md`, { method: "POST", headers: { Origin: ORIGIN } }),
-      await request(`/r/not a name/x/comment-access`, { method: "POST", headers: { Origin: ORIGIN } }),
+      await request(`${priv}/comment-access`, { headers: reader }),
+      await access(priv, { ...reader, Origin: "https://evil.test" }),
+      await access(priv, { ...reader, "Sec-Fetch-Site": "cross-site" }),
+      await request(`${priv}/comment-access`, { method: "POST", headers: reader }),
+      await request(`${priv}/@${fixture.commits.private}/comment-access`, { method: "POST", headers: { Origin: ORIGIN, ...reader } }),
+      await request(`${priv}/~main/comment-access`, { method: "POST", headers: { Origin: ORIGIN, ...reader } }),
+      await request(`${priv}/files/docs/index.md`, { method: "POST", headers: { Origin: ORIGIN, ...reader } }),
+      await request(`/r/not a name/x/comment-access`, { method: "POST", headers: { Origin: ORIGIN, ...reader } }),
     ]) expectPlainNotFound(response);
     expect(grants).toEqual([]);
-    expect(parseRepoPath(`${pub}/comment-access`)?.target).toEqual({ kind: "comment-access" });
+    expect(parseRepoPath(`${priv}/comment-access`)?.target).toEqual({ kind: "comment-access" });
   });
 
   it("pins same-origin to the request's own origin when no canonical site is configured", async () => {
     vi.stubEnv("SITE_URL", undefined);
-    expect((await access(pub)).status).toBe(200);
-    expectPlainNotFound(await access(pub, { Origin: "https://evil.test" }));
+    expect((await access(priv, { cookie: sessions.reader })).status).toBe(200);
+    expectPlainNotFound(await access(priv, { cookie: sessions.reader, Origin: "https://evil.test" }));
   });
 
   it("is a 404 where the read path is not configured", async () => {
-    const response = await app.request(`${ORIGIN}${pub}/comment-access`, { method: "POST", headers: { Origin: ORIGIN } }, {}, fixture.ctx);
+    const response = await app.request(`${ORIGIN}${priv}/comment-access`, { method: "POST", headers: { Origin: ORIGIN } }, {}, fixture.ctx);
     expectPlainNotFound(response);
   });
 });
 
 describe("the first comments come with the first access answer (#284)", () => {
   const first = "?path=docs%2Fguide.md";
-
-  it("hands a public repository's first page to anyone, read for the signed-in reader, never cacheable (#303)", async () => {
-    const response = await access(pub, { cookie: sessions.reader }, first);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(await response.json()).toEqual({
-      repoId: publicRepo.id, private: false, expiresAt: expect.any(Number), threads: { path: "docs/guide.md", page, isDone: false },
-    });
-    // A public grant names no reader; its page is read for the session's reader, so their own threads carry their actions.
-    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
-    expect(grants).toEqual([expect.objectContaining({ repoId: publicRepo.id, userId: null })]);
-  });
-
-  it("reads a public first page as anonymous for a reader the session does not name (#303)", async () => {
-    // No session, a session the backend does not know, and a session check that is down: anyone may read the page.
-    for (const cookie of [undefined, "__Host-better-auth.session_token=unknown-token.sig", "__Host-better-auth.session_token=down-token.sig"]) {
-      const response = await access(pub, cookie ? { cookie } : {}, first);
-      expect(response.status).toBe(200);
-      expect((await response.json() as { threads?: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
-    }
-    expect(snapshots).toEqual(Array.from({ length: 3 }, () => ({ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0 })));
-  });
 
   it("hands a private repository's first page to its reader only, at the epoch the read path checked", async () => {
     fixture.access.epochs.set(users.reader, 7);
@@ -263,26 +259,27 @@ describe("the first comments come with the first access answer (#284)", () => {
     const granted = await access(priv, { cookie: sessions.reader }, first);
     expect(granted.headers.get("Cache-Control")).toBe("private, no-store");
     expect(granted.headers.get("ETag")).toBeNull();
-    expect((await granted.json() as { threads: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
+    expect(await granted.json()).toEqual({ repoId: privateRepo.id, expiresAt: expect.any(Number), threads: { path: "docs/guide.md", page, isDone: false } });
     expect(snapshots).toEqual([{ repoId: privateRepo.id, path: "docs/guide.md", userId: users.reader, epoch: 7 }]);
   });
 
   it("drops the page when Convex refuses the grant: the answer is the plain 404", async () => {
     convex.answer = () => Response.json({ status: "success", value: { granted: false } });
-    const response = await access(pub, {}, first);
+    const response = await access(priv, { cookie: sessions.reader }, first);
     expectPlainNotFound(response);
     expect(await response.json()).toEqual({ error: "Not found" });
   });
 
   it("still grants when the page cannot be read, or is not a repository path; the live subscription delivers it", async () => {
+    const reader = { cookie: sessions.reader };
     convex.snapshot = () => new Response("down", { status: 503 });
-    expect(await (await access(pub, {}, first)).json()).not.toHaveProperty("threads");
+    expect(await (await access(priv, reader, first)).json()).not.toHaveProperty("threads");
     convex.snapshot = () => Response.json({ status: "success", value: { page: "nope" } });
     clearCommentGrantMemory();
-    expect(await (await access(pub, {}, first)).json()).not.toHaveProperty("threads");
+    expect(await (await access(priv, reader, first)).json()).not.toHaveProperty("threads");
     const asked = snapshots.length;
     for (const query of ["?path=", "?path=..%2Fx.md", "?path=a%2F%2Fb.md", `?path=${"a".repeat(1_025)}`]) {
-      const response = await access(pub, {}, query);
+      const response = await access(priv, reader, query);
       expect(response.status).toBe(200);
       expect(await response.json()).not.toHaveProperty("threads");
     }
@@ -293,7 +290,7 @@ describe("the first comments come with the first access answer (#284)", () => {
     const stub = (value: unknown) => {
       globalThis.fetch = vi.fn(() => Promise.resolve(Response.json({ status: "success", value }))) as typeof fetch;
     };
-    const input = { repoId: 1, path: "a.md", userId: null, epoch: 0 };
+    const input = { repoId: 1, path: "a.md", userId: "u", epoch: 0 };
     stub({ page: [1], isDone: true });
     expect(await convexCommentSnapshots.threads(input)).toEqual({ page: [1], isDone: true });
     stub({ page: [1] });
@@ -315,7 +312,7 @@ describe("commentAccess", () => {
 
   it("records nothing for an authorization that has already lapsed", async () => {
     const { calls, grants } = recorder(1);
-    expect(await commentAccess(grants, issueGrant(publicRepo, null, 0, 1_000), 1_000)).toBeNull();
+    expect(await commentAccess(grants, issueGrant(privateRepo, "u", 0, 1_000), "u", 1_000)).toBeNull();
     expect(calls).toEqual([]);
   });
 
@@ -323,26 +320,26 @@ describe("commentAccess", () => {
     clearCommentGrantMemory();
     const { calls, grants } = recorder(61_000);
     const grant = issueGrant(privateRepo, "u", 3, 61_000);
-    expect(await commentAccess(grants, grant, 1_000)).toEqual({ expiresAt: 61_000 });
-    expect(await commentAccess(grants, grant, 30_000)).toEqual({ expiresAt: 61_000 });
+    expect(await commentAccess(grants, grant, "u", 1_000)).toEqual({ expiresAt: 61_000 });
+    expect(await commentAccess(grants, grant, "u", 30_000)).toEqual({ expiresAt: 61_000 });
     expect(calls).toHaveLength(1);
-    expect(await commentAccess(grants, grant, 31_001)).toEqual({ expiresAt: 61_000 });
+    expect(await commentAccess(grants, grant, "u", 31_001)).toEqual({ expiresAt: 61_000 });
     expect(calls).toHaveLength(2);
-    await commentAccess(grants, issueGrant(privateRepo, "u", 4, 61_000), 1_000);
+    await commentAccess(grants, issueGrant(privateRepo, "u", 4, 61_000), "u", 1_000);
     expect(calls).toHaveLength(3);
     const refusing = recorder(null);
-    expect(await commentAccess(refusing.grants, issueGrant(privateRepo, "v", 0, 61_000), 1_000)).toBeNull();
-    expect(await commentAccess(refusing.grants, issueGrant(privateRepo, "v", 0, 61_000), 1_000)).toBeNull();
+    expect(await commentAccess(refusing.grants, issueGrant(privateRepo, "v", 0, 61_000), "v", 1_000)).toBeNull();
+    expect(await commentAccess(refusing.grants, issueGrant(privateRepo, "v", 0, 61_000), "v", 1_000)).toBeNull();
     expect(refusing.calls).toHaveLength(2);
   });
 
   it("keeps a bounded memory", async () => {
     clearCommentGrantMemory();
     const { calls, grants } = recorder(100_000);
-    for (let index = 0; index <= 1_024; index += 1) await commentAccess(grants, issueGrant({ ...publicRepo, id: index + 1 }, null, 0, 100_000), 0);
+    for (let index = 0; index <= 1_024; index += 1) await commentAccess(grants, issueGrant({ ...privateRepo, id: index + 1 }, "u", 0, 100_000), "u", 0);
     // The oldest entry was evicted, so it is recorded again; the newest is still remembered.
-    await commentAccess(grants, issueGrant({ ...publicRepo, id: 1 }, null, 0, 100_000), 0);
-    await commentAccess(grants, issueGrant({ ...publicRepo, id: 1_025 }, null, 0, 100_000), 0);
+    await commentAccess(grants, issueGrant({ ...privateRepo, id: 1 }, "u", 0, 100_000), "u", 0);
+    await commentAccess(grants, issueGrant({ ...privateRepo, id: 1_025 }, "u", 0, 100_000), "u", 0);
     expect(calls).toHaveLength(1_026);
   });
 
@@ -350,7 +347,7 @@ describe("commentAccess", () => {
     const stub = (value: unknown) => {
       globalThis.fetch = vi.fn(() => Promise.resolve(Response.json({ status: "success", value }))) as typeof fetch;
     };
-    const input = { repoId: 1, userId: null, epoch: 0, expiresAt: 5 };
+    const input = { repoId: 1, userId: "u", epoch: 0, expiresAt: 5 };
     stub({ granted: true, expiresAt: 5 });
     expect(await convexCommentGrants.record(input)).toBe(5);
     stub({ granted: true });
@@ -359,6 +356,15 @@ describe("commentAccess", () => {
     expect(await convexCommentGrants.record(input)).toBeNull();
     stub(null);
     await expect(convexCommentGrants.record(input)).resolves.toBeNull();
+  });
+});
+
+describe("commentReader", () => {
+  it("is a private repository's own reader, and nobody for a public repository", () => {
+    expect(commentReader(issueGrant(privateRepo, "u", 0, 1))).toBe("u");
+    expect(commentReader(issueGrant(privateRepo, null, 0, 1))).toBeNull();
+    expect(commentReader(issueGrant(publicRepo, null, 0, 1))).toBeNull();
+    expect(commentReader(issueGrant(publicRepo, "u", 0, 1))).toBeNull();
   });
 });
 
@@ -383,37 +389,30 @@ describe("moderators of a repository's comments (#259)", () => {
     expect(moderatorGrants).toHaveLength(1);
   });
 
-  it("asks the reader's own epoch before the role for a public repository, whose grant names nobody", async () => {
-    fixture.access.epochs.set(users.reader, 9);
-    fixture.access.moderate(users.reader, publicRepo.id, "admin");
-    const response = await access(pub, { cookie: sessions.reader }, first);
-    const { expiresAt } = await response.json() as { expiresAt: number };
-    expect(moderatorGrants).toEqual([{ repoId: publicRepo.id, userId: users.reader, role: "admin", epoch: 9, expiresAt }]);
-    expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 0, expiresAt }]);
-    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader, moderator: true }]);
-  });
-
-  it("gives no role to a reader who is not a moderator, an anonymous reader or a reader the session cannot name, and remembers it", async () => {
+  it("gives no role to a reader who is not a moderator, and remembers it", async () => {
     // Writers, triagers and readers are not moderators: the control Worker says null for them.
-    expect((await access(pub, { cookie: sessions.reader }, first)).status).toBe(200);
-    expect((await access(pub, { cookie: sessions.reader }, first)).status).toBe(200);
-    expect(fixture.access.calls.moderation).toHaveLength(1);
-    for (const headers of [{}, { cookie: "__Host-better-auth.session_token=unknown-token.sig" }, { cookie: "__Host-better-auth.session_token=down-token.sig" }] as Array<Record<string, string>>) {
-      expect((await access(pub, headers, first)).status).toBe(200);
-    }
+    expect((await access(priv, { cookie: sessions.reader }, first)).status).toBe(200);
+    expect((await access(priv, { cookie: sessions.reader }, first)).status).toBe(200);
     expect(fixture.access.calls.moderation).toHaveLength(1);
     expect(moderatorGrants).toEqual([]);
     expect(snapshots.every(asked => !("moderator" in asked))).toBe(true);
   });
 
+  it("asks the control Worker about no one for a public repository", async () => {
+    fixture.access.moderate(users.reader, publicRepo.id, "admin");
+    expectPlainNotFound(await access(pub, { cookie: sessions.reader }, first));
+    expect(fixture.access.calls.moderation).toEqual([]);
+    expect(moderatorGrants).toEqual([]);
+  });
+
   it("ignores every role a request claims: only the control Worker's word counts", async () => {
     const forged = { cookie: sessions.reader, "X-Rendro-Role": "admin", "X-Moderator": "true", Authorization: "Bearer admin" };
-    const response = await access(pub, forged, `${first}&role=admin&moderator=true&userId=${users.outsider}`);
+    const response = await access(priv, forged, `${first}&role=admin&moderator=true&userId=${users.outsider}`);
     expect(response.status).toBe(200);
     expect(moderatorGrants).toEqual([]);
-    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
+    expect(snapshots).toEqual([{ repoId: privateRepo.id, path: "docs/guide.md", userId: users.reader, epoch: 0 }]);
     // Even a body is never read for a role.
-    const body = await app.request(`${ORIGIN}${pub}/comment-access`, {
+    const body = await app.request(`${ORIGIN}${priv}/comment-access`, {
       method: "POST", headers: { Origin: ORIGIN, cookie: sessions.reader, "Content-Type": "application/json" }, body: JSON.stringify({ role: "admin", moderator: true }),
     }, fixture.env, fixture.ctx);
     expect(body.status).toBe(200);
@@ -421,32 +420,33 @@ describe("moderators of a repository's comments (#259)", () => {
   });
 
   it("still grants reading and writing when the role cannot be asked", async () => {
-    fixture.access.moderate(users.reader, publicRepo.id, "admin");
+    fixture.access.moderate(users.reader, privateRepo.id, "admin");
     fixture.access.moderationUnavailable = true;
-    const response = await access(pub, { cookie: sessions.reader }, first);
+    const response = await access(priv, { cookie: sessions.reader }, first);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ threads: { path: "docs/guide.md" } });
     expect(moderatorGrants).toEqual([]);
-    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
+    expect(snapshots).toEqual([{ repoId: privateRepo.id, path: "docs/guide.md", userId: users.reader, epoch: 0 }]);
     // An outage is not remembered as "no role": the next renewal asks again, and the role arrives.
     fixture.access.moderationUnavailable = false;
-    await access(pub, { cookie: sessions.reader }, first);
+    await access(priv, { cookie: sessions.reader }, first);
     expect(moderatorGrants).toHaveLength(1);
   });
 
   it("never records a role without a read grant, and never remembers one Convex refused or could not take", async () => {
-    fixture.access.moderate(users.reader, publicRepo.id, "maintain");
+    const reader = { cookie: sessions.reader };
+    fixture.access.moderate(users.reader, privateRepo.id, "maintain");
     convex.answer = () => Response.json({ status: "success", value: { granted: false } });
-    expectPlainNotFound(await access(pub, { cookie: sessions.reader }));
+    expectPlainNotFound(await access(priv, reader));
     expect(moderatorGrants).toEqual([]);
     convex.answer = args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } });
     convex.moderator = () => Response.json({ status: "success", value: { granted: false } });
-    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
+    expect((await access(priv, reader)).status).toBe(200);
     convex.moderator = () => new Response("down", { status: 503 });
-    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
+    expect((await access(priv, reader)).status).toBe(200);
     // Both refusals left nothing in memory: the role is recorded again at the next request.
     convex.moderator = args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } });
-    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
+    expect((await access(priv, reader)).status).toBe(200);
     expect(moderatorGrants).toHaveLength(3);
   });
 });

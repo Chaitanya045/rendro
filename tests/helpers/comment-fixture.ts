@@ -26,10 +26,10 @@ export async function fixture() {
     });
     return { name, userId: user._id as string, sessionId: session._id as string };
   })));
-  // The read path records a public repository's grant once, for every reader (userId null).
-  await backend.mutation(api.repoCommentAccess.grant, {
-    internalSecret: process.env.CONVEX_INTERNAL_SECRET!, repoId: REPO_ID, userId: null, epoch: 0, expiresAt: now + 60_000,
-  });
+  // The read path records a private repository's grant for each reader it authorized.
+  await Promise.all(users.map(user => backend.mutation(api.repoCommentAccess.grant, {
+    internalSecret: process.env.CONVEX_INTERNAL_SECRET!, repoId: REPO_ID, userId: user.userId, epoch: 0, expiresAt: now + 60_000,
+  })));
   const viewers = Object.fromEntries(users.map((user) => [
     user.name, backend.withIdentity({ subject: user.userId, sessionId: user.sessionId }),
   ]));

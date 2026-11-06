@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { test as base, expect, guardContext } from "./fixtures";
 import { provision, signInSeeded, type Workspace } from "./shell-helpers";
+import { becomeReader } from "./comment-helpers";
 
 export type Actor = Workspace & { context: BrowserContext; page: Page; label: string; name: string };
 type Options = { signedOut?: boolean };
@@ -12,7 +13,7 @@ type Options = { signedOut?: boolean };
  * provisioning for journeys that begin at a mailed link.
  */
 export type SeededRole = "owner" | "admin" | "member" | "outsider";
-export const test = base.extend<{ actor: (label: string, options?: Options) => Promise<Actor>; seeded: (role: SeededRole) => Promise<Page> }>({
+export const test = base.extend<{ actor: (label: string, options?: Options) => Promise<Actor>; reader: (label: string) => Promise<Actor>; seeded: (role: SeededRole) => Promise<Page> }>({
   /** A page signed in as one of the globally seeded users, in its own guarded context. Read-only and denial journeys only. */
   seeded: async ({ browser, baseURL, seed }, use, info) => {
     const opened: Array<{ context: BrowserContext; unexpected: Set<string> }> = [];
@@ -30,6 +31,14 @@ export const test = base.extend<{ actor: (label: string, options?: Options) => P
       for (const { context } of opened) await context.close();
       expect(opened.flatMap(({ unexpected }) => [...unexpected]), "Unexpected external requests from seeded pages").toEqual([]);
     }
+  },
+  /** An actor who is also a GitHub reader of the private comment-docs repository (#353): comments exist there only. */
+  reader: async ({ actor }, use) => {
+    await use(async label => {
+      const person = await actor(label);
+      await becomeReader(person.page);
+      return person;
+    });
   },
   actor: async ({ browser, baseURL }, use, info) => {
     const opened: Array<{ context: BrowserContext; unexpected: Set<string> }> = [];

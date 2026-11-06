@@ -192,15 +192,17 @@ describe("parent compatibility and recovery", () => {
     expect(await lab.page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("commentor-operations:")))).toEqual([]);
   });
 
-  it("lets a reader who is not signed in read a repository's comments, but never write", async () => {
+  it("shows a shell with no signed-in reader no comments and lets it write nothing (#353)", async () => {
     const lab = await commentLab.open({ user: "" });
-    await lab.ready([{ _id: "t1", anchor: heading }]);
-    await expect.poll(() => lab.pins().count()).toBe(1);
+    await lab.ui.locator('[data-testid="commentor-dock"]').waitFor({ state: "attached" });
+    // The widget asks to subscribe; the shell answers nobody it cannot name.
+    await expect.poll(async () => (await lab.calls).length).toBe(0);
+    expect(await lab.host(l => l.subscriptions)).toBe(0);
+    expect(await lab.pins().count()).toBe(0);
     expect(await lab.tid("commentor-comment-btn").isDisabled()).toBe(true);
     await lab.select("#intro", 4, 15);
     await lab.selectionSettled();
     expect(await lab.tid("commentor-selection-action").getAttribute("data-state")).toBe("closed");
-    expect(await lab.calls).toEqual([]);
   });
 });
 

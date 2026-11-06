@@ -36,12 +36,12 @@ async function pressOn(page: Page, target: Locator) {
   await page.mouse.down();
 }
 
-test("a click held while a live update rebuilds the list still acts, and the update follows", async ({ actor }) => {
+test("a click held while a live update rebuilds the list still acts, and the update follows", async ({ reader: makeReader }) => {
   test.setTimeout(240_000);
   const { comments } = repos();
   const doc = await journeyDoc("press");
   const scope = { repoId: repoIds.comments, path: doc.path };
-  const reader = await actor("press");
+  const reader = await makeReader("press");
   await open(reader.page, comments, doc.path, doc.commit);
   const token = await sessionToken(reader.page);
   const anchor = await anchorOn(reader.page, "quick brown");
