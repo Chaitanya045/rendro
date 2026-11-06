@@ -77,6 +77,15 @@ function searchable(text: string): string {
  * the first run in a database creates the keyed index, swaps the triggers,
  * rebuilds the index from `sections` and drops the old one, all in the one
  * batch (a transaction). Every later run is a no-op.
+ *
+ * Where it runs (#358): the write side (`hasBlob`, `putBlob`, `deleteRepo`)
+ * migrates once per isolate before its first statement. `query` never does:
+ * it runs its SELECT, and only when D1 answers "no such table/column" (a
+ * database no write has reached yet, or one still on an older schema) does it
+ * migrate and retry once. So a schema change reaches readers through the
+ * rule: the SELECT must fail on the previous schema (name a table or column
+ * it lacks). A change the old schema answers correctly needs no migration to
+ * be read, and the next ingest applies it.
  */
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS sections (
@@ -143,22 +152,40 @@ interface SectionRow {
   snippet: string;
 }
 
-// One migration promise per database, however many index objects wrap it: the
-// serving Worker builds a fresh one per request.
-const migrations = new WeakMap<SearchD1, Promise<void>>();
+/**
+ * Whether D1 (or SQLite) refused a statement because the schema it names is not there. D1 words it
+ * `D1_ERROR: no such table: sections_search: SQLITE_ERROR` (checked on workerd's local D1); a column the
+ * statement names that an older table lacks reads `no such column: …`. Nothing else triggers a migration.
+ */
+export function isMissingSchema(error: unknown): boolean {
+  return error instanceof Error && /\bno such (?:table|column)\b/i.test(error.message);
+}
+
+interface Migration {
+  ready: Promise<void>;
+  settled: boolean;
+}
+
+// One migration per database, however many index objects wrap it: the serving Worker builds a fresh one per
+// request. A failed migration is forgotten, so the next caller tries again instead of inheriting the failure.
+const migrations = new WeakMap<SearchD1, Migration>();
 
 export function d1SearchIndex(db: SearchD1): SearchIndex {
-  const migrate = (): Promise<void> => {
-    let ready = migrations.get(db);
-    if (!ready) {
-      ready = (async () => {
-        // One round trip. DDL in a batch is fine; `exec` would split the
-        // statements on every line and cannot run triggers at all.
-        await db.batch(SCHEMA.map(statement => db.prepare(statement)));
-      })();
-      migrations.set(db, ready);
-    }
-    return ready;
+  const start = (): Migration => {
+    // One round trip. DDL in a batch is fine; `exec` would split the
+    // statements on every line and cannot run triggers at all.
+    const migration: Migration = { settled: false, ready: db.batch(SCHEMA.map(statement => db.prepare(statement))).then(() => undefined) };
+    // Only the current migration can fail: a new one starts only when none is in flight.
+    migration.ready.then(() => { migration.settled = true; }, () => { migrations.delete(db); });
+    migrations.set(db, migration);
+    return migration;
+  };
+  /** The write side's guard: the schema is brought up to date once per isolate, before the first write. */
+  const migrate = (): Promise<void> => (migrations.get(db) ?? start()).ready;
+  /** The read path's repair, after D1 said the schema is missing: join a migration in flight, else run one again. */
+  const remigrate = (): Promise<void> => {
+    const current = migrations.get(db);
+    return (current && !current.settled ? current : start()).ready;
   };
 
   return {
@@ -185,8 +212,14 @@ export function d1SearchIndex(db: SearchD1): SearchIndex {
       if (failed) throw failed.reason;
     },
     async query(repoId, match, limit) {
-      await migrate();
-      const rows = await db.prepare(SELECT_HITS).bind(scopedMatch(repoId, match), repoId, limit).all<SectionRow>();
+      // No DDL on the read path (#358): the query runs as is. Only when D1 says the schema is missing (a database
+      // no write has reached yet, or one still on an older schema) does it migrate, and it retries once.
+      const select = async () => db.prepare(SELECT_HITS).bind(scopedMatch(repoId, match), repoId, limit).all<SectionRow>();
+      const rows = await select().catch(async (error: unknown) => {
+        if (!isMissingSchema(error)) throw error;
+        await remigrate();
+        return select();
+      });
       return rows.results.map((row): SearchHit => ({ blobSha: row.blob_sha, slug: row.slug, title: row.title, snippet: row.snippet }));
     },
     async deleteRepo(repoId, limit) {

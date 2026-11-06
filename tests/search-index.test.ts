@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PageSection } from "../src/ingest/sections";
-import { d1SearchIndex, repoSearchKey, type SearchD1, type SearchD1Result, type SearchD1Statement } from "../src/search/d1";
+import { d1SearchIndex, isMissingSchema, repoSearchKey, type SearchD1, type SearchD1Result, type SearchD1Statement } from "../src/search/d1";
 import { SqliteSearchD1 } from "./helpers/search-sqlite";
 
 const section = (slug: string, title: string, text: string): PageSection => ({ slug, title, text });
@@ -280,6 +280,128 @@ describe("d1SearchIndex: per-repository scoping in the index (#294)", () => {
     expect(await index.deleteRepo(5, 10)).toBe(1);
     expect(await index.query(5, '"afterwards"', 10)).toEqual([]);
     expect(schema()).toHaveLength(4);
+  });
+});
+
+/** A D1 over `database` that records every prepared statement and every batch, and can fail chosen ones. */
+function spied(database: SqliteSearchD1, fail: { select?: Error; batches?: Error[] } = {}) {
+  const log: string[] = [];
+  const d1: SearchD1 = {
+    prepare(sql) {
+      const statement = database.prepare(sql);
+      const wrapped: SearchD1Statement = {
+        bind(...values) {
+          statement.bind(...values);
+          return wrapped;
+        },
+        all: () => {
+          log.push(sql.startsWith("SELECT s.blob_sha") ? "select" : "other");
+          if (fail.select && sql.startsWith("SELECT s.blob_sha")) return Promise.reject(fail.select);
+          return statement.all();
+        },
+        run: () => statement.run(),
+      };
+      return wrapped;
+    },
+    batch(statements) {
+      log.push("batch");
+      const error = fail.batches?.shift();
+      return error ? Promise.reject(error) : database.batch(statements);
+    },
+    exec: sql => database.exec(sql),
+  };
+  return { d1, log };
+}
+
+describe("query keeps schema migration off the read path (#358)", () => {
+  it("answers from an existing schema without issuing any DDL", async () => {
+    const database = new SqliteSearchD1();
+    await d1SearchIndex(database).putBlob(3, "a".repeat(40), [section("intro", "Intro", "installation notes")]);
+    // A new isolate: a fresh index object over the already-migrated database.
+    const { d1, log } = spied(database);
+    expect(await d1SearchIndex(d1).query(3, '"installation"', 10)).toHaveLength(1);
+    expect(log).toEqual(["select"]);
+  });
+
+  it("migrates a brand-new database and retries once when the schema is missing", async () => {
+    const database = new SqliteSearchD1();
+    const { d1, log } = spied(database);
+    const index = d1SearchIndex(d1);
+    expect(await index.query(3, '"installation"', 10)).toEqual([]);
+    expect(log).toEqual(["select", "batch", "select"]);
+    // The database is migrated for good: the next query is a single read.
+    expect(database.database.prepare("SELECT name FROM sqlite_master WHERE name = 'sections_search'").all()).toHaveLength(1);
+    await index.query(3, '"installation"', 10);
+    expect(log).toEqual(["select", "batch", "select", "select"]);
+  });
+
+  it("shares one migration between concurrent first queries", async () => {
+    const { d1, log } = spied(new SqliteSearchD1());
+    const index = d1SearchIndex(d1);
+    await Promise.all([index.query(1, '"abc"', 5), index.query(2, '"abc"', 5), index.query(3, '"abc"', 5)]);
+    expect(log.filter(entry => entry === "batch")).toHaveLength(1);
+  });
+
+  it("re-runs the migration when the schema vanishes after this isolate migrated it", async () => {
+    const database = new SqliteSearchD1();
+    const { d1, log } = spied(database);
+    const index = d1SearchIndex(d1);
+    await index.migrate();
+    database.database.exec("DROP TABLE sections_search");
+    expect(await index.query(1, '"abc"', 5)).toEqual([]);
+    expect(log).toEqual(["batch", "select", "batch", "select"]);
+  });
+
+  it("lets an older schema's reader reach the current schema: the new query fails on it, so ingest's migration is not needed first", async () => {
+    const database = new SqliteSearchD1();
+    database.database.exec(UNKEYED_SCHEMA);
+    database.database.prepare("INSERT INTO sections VALUES (?, ?, ?, ?, ?)").run(5, "d".repeat(40), "old", "Old title", "indexed before the keys");
+    const { d1, log } = spied(database);
+    expect(await d1SearchIndex(d1).query(5, '"before"', 10)).toMatchObject([{ slug: "old" }]);
+    expect(log).toEqual(["select", "batch", "select"]);
+    expect(database.database.prepare("SELECT name FROM sqlite_master WHERE name = 'sections_fts'").all()).toEqual([]);
+  });
+
+  it("raises any other failure without migrating or retrying", async () => {
+    const { d1, log } = spied(new SqliteSearchD1(), { select: new Error("D1_ERROR: D1 DB is overloaded: SQLITE_BUSY") });
+    await expect(d1SearchIndex(d1).query(1, '"abc"', 5)).rejects.toThrow("overloaded");
+    expect(log).toEqual(["select"]);
+  });
+
+  it("raises the retry's failure, and a failed migration, without looping", async () => {
+    const missing = new Error("D1_ERROR: no such table: sections_search: SQLITE_ERROR");
+    const stillMissing = spied(new SqliteSearchD1(), { select: missing });
+    await expect(d1SearchIndex(stillMissing.d1).query(1, '"abc"', 5)).rejects.toThrow("no such table");
+    expect(stillMissing.log).toEqual(["select", "batch", "select"]);
+
+    const database = new SqliteSearchD1();
+    const broken = spied(database, { batches: [new Error("D1_ERROR: migration failed")] });
+    const index = d1SearchIndex(broken.d1);
+    await expect(index.query(1, '"abc"', 5)).rejects.toThrow("migration failed");
+    // The failure is not remembered: the next query migrates again and succeeds.
+    expect(await index.query(1, '"abc"', 5)).toEqual([]);
+    expect(broken.log).toEqual(["select", "batch", "select", "batch", "select"]);
+  });
+
+  it("still migrates before the write side's first statement", async () => {
+    const database = new SqliteSearchD1();
+    const { d1, log } = spied(database);
+    const index = d1SearchIndex(d1);
+    expect(await index.hasBlob(1, "a".repeat(40))).toBe(false);
+    expect(log[0]).toBe("batch");
+    await index.putBlob(1, "a".repeat(40), [section("intro", "Intro", "installation notes")]);
+    expect(log.filter(entry => entry === "batch")).toHaveLength(2);
+    expect(await d1SearchIndex(spied(new SqliteSearchD1()).d1).deleteRepo(1, 10)).toBe(0);
+  });
+
+  it("recognizes D1's and SQLite's wording of a missing table or column, and nothing else", () => {
+    expect(isMissingSchema(new Error("D1_ERROR: no such table: sections_search: SQLITE_ERROR"))).toBe(true);
+    expect(isMissingSchema(new Error("D1_ERROR: no such column: rk at offset 7: SQLITE_ERROR"))).toBe(true);
+    expect(isMissingSchema(new Error("no such table: sections_search"))).toBe(true);
+    expect(isMissingSchema(new Error("D1_ERROR: database is locked: SQLITE_BUSY"))).toBe(false);
+    expect(isMissingSchema(new Error("D1_ERROR: fts5: syntax error near \"AND\": SQLITE_ERROR"))).toBe(false);
+    expect(isMissingSchema("no such table")).toBe(false);
+    expect(isMissingSchema(null)).toBe(false);
   });
 });
 
