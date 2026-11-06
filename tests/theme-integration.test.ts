@@ -7,8 +7,11 @@ import { renderNotFoundPage } from "@/routes/not-found";
 import { sharedThemeRuntime, renderThemeButton, sharedThemeStyles } from "@/routes/theme";
 import { mobileViewportStyles } from "@/routes/viewport";
 import { renderLandingPage } from "@/routes/landing";
+import { shellScript } from "@/shell/shell-script";
+import { readFileSync } from "node:fs";
 
-function assertSharedTheme(html: string, buttonId?: "theme-toggle") {
+/** `script` is where the page mounts its toggle: inline in `html`, or the repository shell's /shell.js (#359). */
+function assertSharedTheme(html: string, buttonId?: "theme-toggle", script = html) {
   expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon"/>');
   expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml"/>');
   expect(html).toContain(sharedThemeRuntime);
@@ -16,7 +19,7 @@ function assertSharedTheme(html: string, buttonId?: "theme-toggle") {
   expect(html.match(/<script data-rendro-theme="">/g)).toHaveLength(1);
   if (buttonId) {
     expect(html).toContain(renderThemeButton());
-    expect(html).toContain(`RendroTheme.mount(document.getElementById("${buttonId}")`);
+    expect(script).toContain(`RendroTheme.mount(document.getElementById("${buttonId}")`);
     expect(html.match(new RegExp(`id="${buttonId}"`, "g"))).toHaveLength(1);
   }
   expect(html).not.toContain("function transitionTheme(");
@@ -39,12 +42,14 @@ describe("shared theme integration", () => {
   });
 
   it("gives document toolbar controls the same strong hover and Ember focus treatment", () => {
-    const html = repoShell();
-    expect(html).toContain(".topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}");
-    expect(html).toContain(".topbar-btn-icon:focus-visible{outline:2px solid #c2410c;outline-offset:2px}");
-    expect(html).toContain("html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible{outline-color:#fb923c}");
-    expect(html).not.toContain(".topbar-btn-share:focus-visible{outline:2px solid #71717a");
-    expect(html).not.toContain(".mobile-more-menu #theme-toggle:hover");
+    // The shell's styles are the immutable stylesheet it links (#359).
+    expect(repoShell()).toMatch(/<link rel="stylesheet" href="\/styles\/shell\.[0-9a-f]+\.css"/);
+    const css = readFileSync(new URL("../src/styles/shell.css", import.meta.url), "utf8");
+    expect(css).toContain(".topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}");
+    expect(css).toContain(".topbar-btn-icon:focus-visible{outline:2px solid #c2410c;outline-offset:2px}");
+    expect(css).toContain("html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible{outline-color:#fb923c}");
+    expect(css).not.toContain(".topbar-btn-share:focus-visible{outline:2px solid #71717a");
+    expect(css).not.toContain(".mobile-more-menu #theme-toggle:hover");
   });
   it("uses the shared theme on landing before content paints, with light and dark tokens", () => {
     const html = renderLandingPage();
@@ -83,11 +88,13 @@ describe("shared theme integration", () => {
 
   it("keeps the repository viewer on the same controller and preserves iframe theme messaging", () => {
     const html = repoShell();
-    assertSharedTheme(html, "theme-toggle");
+    assertSharedTheme(html, "theme-toggle", shellScript);
     const main = html.slice(html.indexOf('<main class="main">'), html.indexOf("</main>"));
     expect(main).toContain('id="sidebar-resizer" role="separator"');
-    expect(html).toContain('RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme)');
-    expect(html).toContain('e.source!==themeFrame.contentWindow');
+    // The shell's behaviour is the versioned /shell.js bundle (#359).
+    expect(html).toMatch(/<script [^>]*src="\/shell\.js\?v=\d+"><\/script>/);
+    expect(shellScript).toContain('RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme)');
+    expect(shellScript).toContain('e.source!==themeFrame.contentWindow');
   });
 
   it("keeps passive error pages in sync without adding a second theme toggle inside documents", () => {
