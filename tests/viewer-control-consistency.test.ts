@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { repoShell as shell } from "./helpers/repo-shell";
+import { shellCss as shell } from "./helpers/repo-shell";
 
 describe("viewer control consistency", () => {
   it("aligns desktop toolbar controls", () => {

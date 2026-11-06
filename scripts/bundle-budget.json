@@ -31,9 +31,17 @@
     "raw": 12893,
     "brotli": 4418
   },
+  "public/shell.js": {
+    "raw": 12850,
+    "brotli": 3388
+  },
   "public/styles/repo-doc.css": {
     "raw": 7231,
     "brotli": 1987
+  },
+  "public/styles/shell.css": {
+    "raw": 35348,
+    "brotli": 5875
   },
   "public/styles/viewer-base.css": {
     "raw": 1435,
@@ -44,7 +52,7 @@
     "brotli": 99904
   },
   "worker:src/worker.ts": {
-    "raw": 516488,
-    "brotli": 128936
+    "raw": 480847,
+    "brotli": 123711
   }
 }

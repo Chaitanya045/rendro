@@ -47,7 +47,7 @@
     "rebuild:wasm": "tsx scripts/verify-comrak-wasm.ts --rebuild",
     "build:wasm": "tsx scripts/verify-comrak-wasm.ts --write",
     "bench:hostile": "tsx scripts/benchmark-hostile-input.ts",
-    "build:assets": "tsx scripts/build-private-viewer.ts && tsx scripts/build-commentor.ts && tsx scripts/build-commentor-parent.ts && tsx scripts/build-lazy-tree.ts && tsx scripts/build-rum.ts",
+    "build:assets": "tsx scripts/build-private-viewer.ts && tsx scripts/build-commentor.ts && tsx scripts/build-commentor-parent.ts && tsx scripts/build-lazy-tree.ts && tsx scripts/build-rum.ts && tsx scripts/build-shell.ts",
     "visual": "bash scripts/visual-baselines.sh check",
     "a11y": "RENDRO_E2E_VISUAL=1 playwright test --config e2e/visual.config.ts --project=a11y-chromium --project=a11y-firefox --project=a11y-webkit",
     "visual:update": "bash scripts/visual-baselines.sh update",

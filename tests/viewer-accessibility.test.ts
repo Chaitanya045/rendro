@@ -17,7 +17,11 @@ it.each([
   expect(response.status).toBe(200);
   const nonce = response.headers.get("Content-Security-Policy")?.match(/'nonce-([^']+)'/)?.[1];
   expect(nonce).toBeTruthy();
-  const win = new Window();
+  const win = new Window({
+    // The shell preloads its first tree page (#359): give the document an origin and answer every fetch offline.
+    url: "https://rendro.test/",
+    settings: { fetch: { interceptor: { beforeAsyncRequest: ({ window }) => Promise.resolve(new window.Response(null, { status: 204 })) } } },
+  });
   try {
     win.document.write(await response.text());
     const main = win.document.querySelector("main")!;

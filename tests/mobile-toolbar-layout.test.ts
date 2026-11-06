@@ -62,7 +62,7 @@ class ParentMock extends NodeMock {
 
 describe("mobile document toolbar layout", () => {
   it("uses resize as a breakpoint-only fallback when the media-query change callback is missed", () => {
-    const source = readFileSync(new URL("../src/routes/app.ts", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../src/shell/shell-script.ts", import.meta.url), "utf8");
     const start = source.indexOf('  var mobileMoreButton=document.getElementById("mobile-more-btn")');
     const end = source.indexOf('\n\n  document.addEventListener("keydown"', start);
     expect(start).toBeGreaterThan(-1);

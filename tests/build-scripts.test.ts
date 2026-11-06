@@ -31,6 +31,7 @@ const assets = [
   ["build-commentor-parent.ts", "commentor-parent.js"],
   ["build-lazy-tree.ts", "lazy-tree.js"],
   ["build-rum.ts", "rum.js"],
+  ["build-shell.ts", "shell.js"],
   ["build-private-viewer.ts", "private-viewer.js"],
 ] as const;
 

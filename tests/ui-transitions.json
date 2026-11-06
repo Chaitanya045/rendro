@@ -195,6 +195,10 @@
       "reason": "Static browser code or favicon, not an HTML page."
     },
     {
+      "route": "GET /shell.js",
+      "reason": "Static browser code or favicon, not an HTML page."
+    },
+    {
       "route": "ALL /*",
       "reason": "Middleware registration (security/session/logging/CORS); page handlers are checked separately by method and path."
     },

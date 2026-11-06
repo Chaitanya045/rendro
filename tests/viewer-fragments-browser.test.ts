@@ -5,7 +5,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { securityHeaders } from "@/middleware/security-headers";
 import { viewerScript } from "@/viewer/markup";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
-import { repoShell } from "./helpers/repo-shell";
+import { repoShell, shellAsset } from "./helpers/repo-shell";
+import { serveStyles } from "./helpers/styles";
 
 /** A repository's docs shell (#234) with its lazy tree, and document frames that run the real navigation bridge. */
 const privateBase = "/r/acme/docs";
@@ -93,6 +94,9 @@ beforeAll(async () => {
   const app = new Hono();
   app.use("*", securityHeaders);
   app.get("/private-viewer.js", c => c.body(viewer, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
+  // The shell's CSS is a hashed same-origin file (#359): without it the frame has no size.
+  app.get("/styles/*", serveStyles);
+  app.get(shellAsset[0], c => c.body(shellAsset[1], 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   app.get("/lazy-tree.js", c => c.body(tree, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   app.get(privateBase, c => {
     const selected = c.req.query("doc") ?? documents[0];

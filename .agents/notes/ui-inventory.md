@@ -52,7 +52,7 @@ Routes feeding visible state, also part of compatibility: `P/docs/tree`, `P/docs
 
 ### 1.2 Global appearance, controls and session lifecycle
 
-Sources: `src/routes/theme.ts`, `control-plane.ts:456`, `src/ui/{select,select-browser,select-styles,menu-styles,management-ui}.ts`, `src/commentor/recovery-session.ts`.
+Sources: `src/routes/theme.ts`, `control-plane.ts:456`, `src/ui/{select,select-browser,select-styles,management-ui}.ts`, `src/commentor/recovery-session.ts`.
 
 - **G01 Theme initialization:** absent/invalid/unavailable storage resolves to system; initialize before paint; retain `commentor-theme` key and system/dark/light meanings across landing, auth, management and viewers.
 - **G02 Theme interaction:** system → dark → light → system; button icon/label/title; 300ms icon track and 520ms radial reveal; rapid clicks preserve latest intent; snapshot rejection and unsupported View Transitions switch directly; preference saved before navigation; reduced motion switches directly.

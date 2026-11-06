@@ -282,7 +282,7 @@ Request
   │   ├─ /r/{owner}/{repo}/…              repository docs (own capability cookie; session only on a miss)
   │   └─ POST /rum                        real-user monitoring beacons (no cookie read or set)
   ├─ 5. Public static assets (explicit allowlist, `src/routes/public-assets.ts`)
-  │   ├─ versioned bundles: /lazy-tree.js, /private-viewer.js, /commentor-parent.js, /commentor.js, /rum.js
+  │   ├─ versioned bundles: /lazy-tree.js, /private-viewer.js, /commentor-parent.js, /commentor.js, /rum.js, /shell.js
   │   └─ /favicon.svg, /favicon.ico, /landing-product.webp, /fonts/*, /styles/*
   ├─ 6. Session middleware
   ├─ 7. Write admission and body admission
@@ -365,7 +365,7 @@ Trusted HTML policies also use `object-src 'none'`, `base-uri 'self'`, and `form
 
 ### Server-rendered HTML (Hono JSX)
 
-Every Rendro-owned page is server-only Hono JSX (#288): the landing page, the auth pages and `/home`, the repository shell, the preparing page, the 404 and "temporarily unavailable" pages, sign-out, and the shared head (`src/routes/head.tsx`: favicons, fonts, stylesheet links, the theme assets and button, the comment-recovery bootstrap). JSX is compiled with `jsxImportSource: "hono/jsx"` and nothing of it reaches the browser: no client framework, no hydration, and the client bundles' bytes do not change. Each page's markup is a `.tsx` module beside the `.ts` module that keeps its inline CSS and script as constants and re-exports its `render…` function (`landing.ts` ↔ `landing-page.tsx`, `app.ts` ↔ `shell.tsx`, `auth-pages.ts` ↔ `auth-page.tsx`, and so on). `tests/jsx-boundary.test.ts` keeps `.tsx` to `src/routes` and `src/repo-read`.
+Every Rendro-owned page is server-only Hono JSX (#288): the landing page, the auth pages and `/home`, the repository shell, the preparing page, the 404 and "temporarily unavailable" pages, sign-out, and the shared head (`src/routes/head.tsx`: favicons, fonts, stylesheet links, the theme assets and button, the comment-recovery bootstrap). JSX is compiled with `jsxImportSource: "hono/jsx"` and nothing of it reaches the browser: no client framework, no hydration, and the client bundles' bytes do not change. Each page's markup is a `.tsx` module beside the `.ts` module that keeps its inline CSS and script as constants and re-exports its `render…` function (`landing.ts` ↔ `landing-page.tsx`, `app.ts` ↔ `shell.tsx` (whose CSS and script moved to `src/styles/shell.css` and `src/shell/shell-script.ts` in #359), `auth-pages.ts` ↔ `auth-page.tsx`, and so on). `tests/jsx-boundary.test.ts` keeps `.tsx` to `src/routes` and `src/repo-read`.
 
 Hono JSX escapes every string it renders, in text and attributes. `src/routes/trusted-html.tsx` is the one module that writes text unescaped, and only:
 
@@ -406,7 +406,7 @@ Convex caches a query result until a document it read changes; elapsed time does
 ```
 Server (Hono SSR)
   │
-  ├─ renderScopedDocumentShell(options)  (markup src/routes/shell.tsx, CSS and script src/routes/app.ts; called by src/repo-read/routes.ts)
+  ├─ renderScopedDocumentShell(options)  (markup src/routes/shell.tsx, CSS src/styles/shell.css, script src/shell/shell-script.ts; called by src/repo-read/routes.ts)
   │   ├─ Topbar (repository title, copy-link, theme, shell hide/show; mobile "More document actions" menu)
   │   ├─ Sidebar (#doc-sidebar, resizable, mobile drawer)
   │   │   ├─ repository search (#repo-search, when the search binding exists)
@@ -415,8 +415,11 @@ Server (Hono SSR)
   │   ├─ Main area
   │   │   ├─ #main-placeholder
   │   │   └─ #content-frame (sandboxed iframe)
-  │   ├─ Inline scripts (theme, shell hide/show, shortcut forwarding, copy-link feedback)
-  │   ├─ <script src="/lazy-tree.js?v=…">, /rum.js?v=…
+  │   ├─ <head>: <link rel="preload" as="fetch" crossorigin href="{frameBase}/tree?dir="> (first sidebar page, #359),
+  │   │   fonts, the theme bootstrap (inline, small), /styles/shell.<hash>.css, /styles/viewer-base.<hash>.css
+  │   ├─ <script src="/shell.js?v=…"> (theme control, shell hide/show, shortcut forwarding, copy-link feedback), then the
+  │   │   inline data bootstrap (RENDRO_* globals) and comment-recovery script
+  │   ├─ <script src="/lazy-tree.js?v=…"> (before the comment host so the tree starts first), /rum.js?v=… (async)
   │   ├─ /commentor-parent.js?v=… (comment host, when Convex is configured)
   │   └─ /private-viewer.js?v=… and its update notice (private repositories: ticket renewal)
   │
@@ -441,7 +444,7 @@ Client (lazy-tree.js, built from src/lazy-tree/)
   │   ├─ doc-navigate → parent authorization / confirmation → loadDoc(path, push/replace)
   │   ├─ doc-external (another site, or a page of this site that is not a document) → parent confirmation → window.open(href, "_blank", "noopener,noreferrer")
   │   ├─ doc-loaded → acknowledge expected path (no navigation or tree fetch)
-  │   ├─ doc-pointer → (inline shell script) close the More menu; carries no data
+  │   ├─ doc-pointer → (shell.js) close the More menu; carries no data
   │   └─ shell-toggle → Ctrl/Cmd+Shift+H inside the iframe toggles the shell
   └─ popstate / initial URL → loadDoc(path)
 ```
@@ -601,6 +604,17 @@ The repository shell (`/r/…`) keeps navigation inside the shell and makes a li
 - Readiness is the frame's own `doc-loaded` announcement, not its `load` event: an aborted subframe navigation still fires `load` on Chromium's error page, so silence is the only failure signal. A preload that has not spoken is cancelled rather than adopted, and the click loads normally.
 - The reveal runs inside `document.startViewTransition` so the old and new documents cross-fade instead of flashing, unless the reader prefers reduced motion or the API is absent. Either way a `rendro:frame-switch` `performance.measure` records the switch (the target is under 200 ms for a warmed frame), and on the repository read path one `rendro:navigation` measure records activation → swap → load → paint for real-user monitoring (see [Real-user monitoring](#real-user-monitoring-282)).
 - After a reveal the shell re-sends the fragment and settles the loader exactly as a fresh load does.
+### Shell loading order (#359)
+
+The shell HTML is `private, no-cache` (each response has its own nonce), so everything in it is paid on every navigation. It therefore carries markup, the theme bootstrap and a small data bootstrap only; the rest is same-origin, cacheable files:
+
+- **CSS** is `/styles/shell.<hash>.css` (`src/styles/shell.css`, content-hashed and immutable like `viewer-base`), linked in the head ahead of `viewer-base`. It is render-blocking, as `viewer-base` and the inline CSS it replaces already were, and is requested alongside it in the same round trip, so first paint is not later than with inline CSS once the file is cached (immutable, so every navigation after the first). No critical subset is kept inline: the only pre-paint work that must stay inline is the theme bootstrap (`ThemeAssets`) and the font faces, which were already inline and small.
+- **Behaviour** is `/shell.js?v=<SHELL_VERSION>` (`src/shell/shell-script.ts`, minified by `scripts/build-shell.ts`; a versioned bundle in the asset ledger and budget). It is a classic, nonced script at the end of the body, in the same position and order relative to the inline `RENDRO_*` data bootstrap as the inline script it replaces. No CSP change: the nonce plus `'strict-dynamic'`, and `'self'` for stylesheets.
+- **The first sidebar page** is requested while the head is parsed: `<link rel="preload" as="fetch" crossorigin href="{frameBase}/tree?dir=">` (the commit-pinned tree URL, cacheable like every tree page). `lazy-tree.js` fetches exactly that URL with the default same-origin credentials, and `crossorigin` (anonymous) on a same-origin URL is the same credentials mode, so the browser answers the later `fetch()` from the preload: one request, not two. If the preload were ever to miss, the script just fetches again.
+- **Script order** puts `lazy-tree.js` before `commentor-parent.js`, so on `DOMContentLoaded` the tree starts (and, with the preload, usually finishes) before the comment host builds its Convex client and sends the access request.
+
+`tests/shell-loading-browser.test.ts` pins the order in Chromium: the tree request is issued before any shell script, there is exactly one `/tree?dir=` request, `lazy-tree.js` precedes `commentor-parent.js` and has started the tree when the host initializes, the shell CSS is an external hashed sheet, and nothing violates the CSP.
+
 ### Shell-loaded frame documents
 
 The shell answers its content frame only while the frame shows a document the shell itself loaded (#296). The
@@ -732,7 +746,7 @@ Every file the Worker serves from `public/` is public and is served **before the
 
 | Class | Paths | `Cache-Control` | Notes |
 |---|---|---|---|
-| Versioned bundles | `/lazy-tree.js`, `/private-viewer.js`, `/commentor-parent.js`, `/commentor.js`, `/rum.js` | `public, max-age=31536000, immutable` only for the exact current `?v=<version>`; otherwise `no-store` | `text/javascript; charset=utf-8` |
+| Versioned bundles | `/lazy-tree.js`, `/private-viewer.js`, `/commentor-parent.js`, `/commentor.js`, `/rum.js`, `/shell.js` | `public, max-age=31536000, immutable` only for the exact current `?v=<version>`; otherwise `no-store` | `text/javascript; charset=utf-8` |
 | Fonts | `/fonts/<name>.<hash>.woff2` | `public, max-age=31536000, immutable` | content-hashed name; license texts: one day |
 | Stylesheets | `/styles/<name>.<hash>.css` | `public, max-age=31536000, immutable` | content-hashed name |
 | Icons and images | `/favicon.svg`, `/favicon.ico`, `/landing-product.webp` | `public, max-age=86400` | stable URLs (the image is also an external preview), so a daily refresh rather than immutable |
@@ -743,7 +757,7 @@ Every file the Worker serves from `public/` is public and is served **before the
 
 **Adding or changing a bundle.** Bump its constant in `src/viewer/asset-versions.ts`, `pnpm build:assets`, then `pnpm record:assets` (rebase onto `main` first; a version collision is a ledger conflict). CSP nonces are unaffected.
 
-**Bundle-size budget (#285).** `scripts/bundle-budget.json` records the raw and Brotli (quality 11, what the edge serves) bytes of every served bundle: the five versioned bundles, the stylesheets and font subsets (keyed without their content hash) and the comrak WASM. `pnpm verify:budget` runs at the end of `pnpm verify` (so in CI's verify job, after `pnpm build:assets`) and fails when a bundle grows more than 1% over its recorded size in either measure, when a served bundle has no entry, or when an entry names a bundle that is no longer served. The message names the bundle, the old and new sizes and the delta. Shrinking always passes, with a hint to lower the budget. When added weight is intended, run `pnpm build:assets` and `pnpm record:budget` and commit the budget file with the change, so a weight change is reviewed like a baseline (after a rebase onto a `main` that changed a bundle, re-record). The 1% tolerance absorbs toolchain noise; it is measured against the recorded size, not the previous build, so small increments still add up to a failure. Recorded sizes match under Node 22 (CI) and Node 24.
+**Bundle-size budget (#285).** `scripts/bundle-budget.json` records the raw and Brotli (quality 11, what the edge serves) bytes of every served bundle: the six versioned bundles, the stylesheets and font subsets (keyed without their content hash) and the comrak WASM. `pnpm verify:budget` runs at the end of `pnpm verify` (so in CI's verify job, after `pnpm build:assets`) and fails when a bundle grows more than 1% over its recorded size in either measure, when a served bundle has no entry, or when an entry names a bundle that is no longer served. The message names the bundle, the old and new sizes and the delta. Shrinking always passes, with a hint to lower the budget. When added weight is intended, run `pnpm build:assets` and `pnpm record:budget` and commit the budget file with the change, so a weight change is reviewed like a baseline (after a rebase onto a `main` that changed a bundle, re-record). The 1% tolerance absorbs toolchain noise; it is measured against the recorded size, not the previous build, so small increments still add up to a failure. Recorded sizes match under Node 22 (CI) and Node 24.
 
 **Worker bundle guard (#357).** The same budget file also records the serving Worker's minified bundle (key `worker:src/worker.ts`), built by `scripts/worker-bundle.ts` with esbuild the way Wrangler bundles it (ESM, `cloudflare:` and Node built-ins external). `pnpm verify:budget` fails when it grows more than 1% in raw or Brotli bytes, and fails outright, whatever the size, when any of the three Workers (serving, control, ingest) bundles a forbidden package (today `zod`), by esbuild's metafile; `tests/worker-bundle.test.ts` makes the same checks on the real entry points. Dropping zod took the serving Worker from 968,665 to 516,488 raw bytes (203,206 to 128,936 Brotli q11). parse5 (about 150 KB with `entities`) is still in that bundle: Wrangler does not split chunks, so the byte count is unchanged, but `src/repo-read/frame.ts` loads it with `await import("parse5")` on first use (pre-v3 renders and private repositories), so its module evaluation, including the entity tables, is skipped by isolates that never need it.
 
@@ -753,7 +767,9 @@ Every file the Worker serves from `public/` is public and is served **before the
 | `commentor-parent.js` (repository shell, holds the Convex client) | 98,174 | 24,419 |
 | `lazy-tree.js` | 26,274 | 8,057 |
 | `rum.js` | 12,893 | 4,418 |
+| `shell.js` (the shell's own behaviour, #359) | 12,850 | 3,388 |
 | `private-viewer.js` | 6,269 | 2,163 |
+| `shell.css` (the shell's own styles, #359) | 35,348 | 5,875 |
 | `repo-doc.css` / `viewer-base.css` | 7,231 / 1,435 | 1,987 / 577 |
 | Fonts (Inter Latin, Latin Extended, icons; already compressed woff2) | 34,380 / 55,820 / 5,184 | n/a |
 | `comrak_engine_bg.wasm` (Worker, not sent to browsers) | 368,424 | 99,904 |

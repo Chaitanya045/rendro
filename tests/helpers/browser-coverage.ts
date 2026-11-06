@@ -29,6 +29,11 @@ type Script = Profiler.ScriptCoverage & { source?: string };
 
 /** Scripts a viewer serves from a deployment's `…/files/…` are the publisher's own, never one of the app's bundles. */
 const publisherFile = (url: string) => URL.canParse(url) && new URL(url).pathname.includes("/files/");
+/**
+ * Served controllers whose source is a string constant, not a bundled module: the repository shell's `/shell.js`
+ * (#359) is `shellScript`, inlined in the page before. Like the rendered inline controllers, it has no module to map.
+ */
+const stringController = (url: string) => URL.canParse(url) && new URL(url).pathname === "/shell.js";
 type CloseBrowser = (action: () => Promise<void>) => Promise<void>;
 
 export async function convertBrowserCoverage(entries: Script[], root = process.cwd(), include?: Set<string>, scriptUrls = new Set<string>()) {
@@ -49,7 +54,7 @@ export async function convertBrowserCoverage(entries: Script[], root = process.c
       throw new Error(`Incompatible browser script source: ${entry.url}`);
     }
     const code = entry.source ?? recovered;
-    const requiresMap = !publisherFile(entry.url)
+    const requiresMap = !publisherFile(entry.url) && !stringController(entry.url)
       && (scriptUrls.has(entry.url) || (/\.(?:[cm]?js|ts)(?:[?#]|$)/.test(entry.url) && !entry.url.startsWith("__playwright")));
     if (code === undefined && requiresMap) throw new Error(`Missing browser script source: ${entry.url}`);
     if (!code) continue;
