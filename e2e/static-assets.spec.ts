@@ -68,6 +68,25 @@ test.describe("public static assets", () => {
     }
   });
 
+  test("the shell asks for its first tree page before any script, once, and links its own stylesheet and script (#359)", async ({ page: tab, browserName }) => {
+    // Other engines may or may not reuse a fetch preload; Chromium's reuse is the contract under test.
+    test.skip(browserName !== "chromium", "fetch-preload reuse is asserted on Chromium");
+    const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+    const requests: string[] = [];
+    tab.on("request", request => { const url = new URL(request.url()); requests.push(url.pathname + url.search); });
+    await tab.goto(`/r/${open.owner}/${open.name}`);
+    await expect(tab.locator(".tree-item").first()).toBeVisible();
+    await expect(tab.locator("link[rel=stylesheet][href^='/styles/shell.']")).toHaveCount(1);
+    await expect(tab.locator(`script[src='/shell.js?v=${versionedBundles["/shell.js"]}']`)).toHaveCount(1);
+    const trees = requests.filter(url => /\/tree\?dir=$/.test(url));
+    expect(trees, "the preload and the tree script share one request").toHaveLength(1);
+    const first = requests.indexOf(trees[0]);
+    for (const path of ["/shell.js", "/lazy-tree.js", "/commentor-parent.js"]) {
+      const at = requests.findIndex(url => url.startsWith(path));
+      if (at !== -1) expect(at, path).toBeGreaterThan(first);
+    }
+  });
+
   test("a stale, foreign or missing version serves the current bytes uncached, and unlisted paths are 404", async ({ page: tab }) => {
     for (const path of bundlePaths) {
       const current = await tab.request.get(path + currentSearch(path));
