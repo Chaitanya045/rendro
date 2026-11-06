@@ -1,7 +1,8 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { User } from "better-auth/types";
 import { githubAppInstallUrl, signInMethods } from "@/config";
 import { repoAccessBinding } from "@/github-hand-off";
+import { parseRepositoryInput } from "@/github-repo-input";
 import { homeRepositories } from "@/home-repositories";
 import { renderAuthPage } from "./auth-page";
 
@@ -64,6 +65,7 @@ export const authRefreshStyles = `
 .repo-name{min-width:0;overflow-wrap:anywhere;color:var(--muted)}.repo-name strong{color:var(--text);font-weight:650}.repo-meta{display:flex;align-items:center;gap:10px;flex:none;color:var(--muted);font-size:12px}.repo-badge{padding:2px 8px;border:1px solid var(--border);border-radius:999px;color:var(--text);font-weight:650}
 .repo-state{padding:20px;border:1px dashed var(--border);border-radius:10px}.repo-state>p{margin:0 0 14px;color:var(--muted);line-height:1.55}.repo-state>p strong{color:var(--text)}.repo-state>.button{display:inline-flex;width:auto}
 @media(max-width:520px){.repo-link{flex-direction:column;align-items:flex-start;gap:6px}}@media(prefers-reduced-motion:reduce){.repo-link{transition-duration:.01ms}}
+.home-open-form{margin:0 0 24px}.home-open-form h2{margin:0 0 6px;font-size:16px;letter-spacing:-.01em}.home-open-form .hint{margin:0 0 12px;font-size:13px;line-height:1.5}.home-open-form code{padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--text);font-size:.92em}.home-open-row{display:flex;gap:8px}.home-open-row input{flex:1;min-width:0;height:44px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0 12px;outline:none;transition:border-color 150ms cubic-bezier(.4,0,.2,1),box-shadow 150ms cubic-bezier(.4,0,.2,1)}.home-open-row input:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--focus)}.home-open-row input[aria-invalid=true]{border-color:var(--danger)}.home-open-row .button{width:auto;min-width:80px}.home-open-form .message{margin:10px 0 0}@media(max-width:520px){.home-open-row{flex-direction:column}.home-open-row .button{width:100%}}@media(prefers-reduced-motion:reduce){.home-open-row input{transition-duration:.01ms}}
 .home-open p{margin:0;color:var(--muted);line-height:1.6}.home-open code{padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--text);font-size:.92em}
 .topbar{height:56px;padding:0 clamp(18px,4vw,44px);position:relative;z-index:2}.button:focus-visible,.reveal:focus-visible,.method-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .button.primary{color:var(--on-accent)}
@@ -161,9 +163,7 @@ app.get("/reset-password", (c) => c.html(renderAuthPage("reset-password", {
   token: c.req.query("token") ?? "",
   returnTo: safeReturnTo(c.req.query("returnTo")),
 })));
-app.get("/home", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.redirect(signInHref("/home"));
+async function renderHome(c: Context<{ Variables: { user?: User } }>, user: User, openError?: string, status: 200 | 400 = 200) {
   // With GitHub sign-in and the permission mirror (#338), the home lists the reader's repositories from the mirror.
   const binding = signInMethods().github ? repoAccessBinding(c.env) : null;
   if (!binding) return c.html(renderAuthPage("home", { user }));
@@ -172,7 +172,24 @@ app.get("/home", async (c) => {
     repositories: await homeRepositories(binding, user.id),
     installUrl: githubAppInstallUrl(),
     notice: notice === "installed" || notice === "requested" ? notice : null,
-  } }));
+    ...openError === undefined ? {} : { openError },
+  } }), status);
+}
+
+app.get("/home", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.redirect(signInHref("/home"));
+  return renderHome(c, user);
+});
+
+/** The home's box (#354): a GitHub address or `owner/repo` opens that repository's docs; anything else says why not. */
+app.get("/home/open", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.redirect(signInHref("/home"));
+  const typed = c.req.query("repo") ?? "";
+  const repository = parseRepositoryInput(typed);
+  if (!repository) return renderHome(c, user, typed.slice(0, 300), 400);
+  return c.redirect(`/r/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}`);
 });
 
 app.get("/account/security", (c) => {

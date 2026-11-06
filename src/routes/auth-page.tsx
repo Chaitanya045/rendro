@@ -24,6 +24,25 @@ export interface HomeView {
   installUrl: string | null;
   /** Back from GitHub's setup URL: the app was installed, or an organization owner was asked to approve it. */
   notice: "installed" | "requested" | null;
+  /** The box that opens any public repository (#354): what the reader typed when it was not a repository. */
+  openError?: string;
+}
+
+/** Any signed-in reader opens any public GitHub repository by name or address (#354). */
+function OpenRepositoryForm({ typed }: { typed?: string }) {
+  return (
+    <form class="home-open-form" method="get" action="/home/open" aria-labelledby="home-open-form-title">
+      <h2 id="home-open-form-title">Open a public repository</h2>
+      <p class="hint">Any public repository on GitHub opens here, whether or not it has the app installed. Paste its address or type <code>owner/repo</code>.</p>
+      <div class="home-open-row">
+        <input id="home-open-input" name="repo" type="text" required maxlength={300} autocomplete="off" autocapitalize="none" spellcheck={false}
+          placeholder="github.com/owner/repo" aria-label="Repository address or owner/repo" aria-invalid={typed === undefined ? undefined : "true"}
+          aria-describedby={typed === undefined ? undefined : "home-open-error"} value={typed ?? ""} />
+        <button class="button primary" type="submit">Open</button>
+      </div>
+      {typed !== undefined && <p class="message error" id="home-open-error" role="alert">That is not a GitHub repository address. Use <code>owner/repo</code> or a github.com link.</p>}
+    </form>
+  );
 }
 
 const EMAIL_ONLY: SignInMethods = { github: false, email: true };
@@ -243,6 +262,7 @@ function PageBody({ page, user, verified = false, token = "", error = "", linkIn
     return (
       <>
         <div class="heading"><p class="eyebrow">Signed in</p><h1>Welcome, {user?.name ?? ""}</h1><p>You are signed in as <strong>{user?.email ?? ""}</strong>.</p></div>
+        {home && <OpenRepositoryForm typed={home.openError} />}
         {home && <HomeRepositoriesSection {...home} />}
         {!home && <section class="security-action home-open" aria-labelledby="home-open-title"><h2 id="home-open-title">Open a repository's documentation</h2><p>Rendro shows the Markdown of a GitHub repository at its own address: <code>{"/r/{owner}/{repo}"}</code>. For example, <code>/r/acme/handbook</code> opens the handbook repository of the acme account.</p></section>}
         <AccountFooter href="/account/security" label="Account security" />

@@ -104,6 +104,21 @@ test("a signed-in reader opens a public repository the App is not installed on; 
   await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
 });
 
+test("the home's box opens a public repository by its GitHub address, and refuses text that is not one (#354)", async ({ page, seed, baseURL }) => {
+  const { uninstalled } = repos();
+  await signInSeeded(page.context(), baseURL, seed, "outsider");
+  await page.goto("/home");
+  const box = page.getByRole("textbox", { name: "Repository address or owner/repo" });
+  await box.fill("not a repository");
+  await box.press("Enter");
+  await expect(page.getByRole("alert").filter({ hasText: "That is not a GitHub repository address" })).toBeVisible();
+  await expect(box).toHaveValue("not a repository");
+  await box.fill(`https://github.com/${uninstalled.owner}/${uninstalled.name}.git`);
+  await box.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/r/${uninstalled.owner}/${uninstalled.name}$`));
+  await expect(heading(page, "Library home")).toBeVisible();
+});
+
 test("a granted reader browses a private repository with a capability cookie and ticketed images; others get a plain 404", async ({ page, secondContext, seed, baseURL }) => {
   const { closed } = repos();
   const url = `/r/${closed.owner}/${closed.name}`;

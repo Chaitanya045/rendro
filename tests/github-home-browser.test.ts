@@ -96,3 +96,35 @@ it('offers the install link on an empty list, and a retry that loads the list on
   await failed.getByRole('link', { name: 'Try again' }).click();
   await expect.poll(() => failed.locator('.repo-link').count()).toBe(2);
 });
+
+it('opens any public repository from the box by keyboard, and explains text that is not one without losing it (#354)', async () => {
+  const page = await open(listed);
+  const input = page.getByRole('textbox', { name: 'Repository address or owner/repo' });
+  await input.focus();
+  expect(await input.evaluate(node => getComputedStyle(node).outlineStyle !== 'none' || getComputedStyle(node).boxShadow !== 'none')).toBe(true);
+  await input.fill('not a repository');
+  await page.keyboard.press('Enter');
+  await page.waitForURL(`${harness.origin}/home/open?repo=not+a+repository`);
+  const alert = page.getByRole('alert');
+  expect(await alert.textContent()).toBe('That is not a GitHub repository address. Use owner/repo or a github.com link.');
+  const again = page.getByRole('textbox', { name: 'Repository address or owner/repo' });
+  expect(await again.inputValue()).toBe('not a repository');
+  expect(await again.getAttribute('aria-invalid')).toBe('true');
+  expect(await again.getAttribute('aria-describedby')).toBe('home-open-error');
+  await again.fill('https://github.com/Octo/docs.git');
+  await page.keyboard.press('Enter');
+  await page.waitForURL(`${harness.origin}/r/Octo/docs`);
+  expect(page.errors).toEqual([]);
+});
+
+it('keeps the box and its button inside the card on a phone', async () => {
+  const page = await open(listed, 375);
+  const box = page.locator('.home-open-form');
+  expect(await box.evaluate(node => getComputedStyle(node.querySelector('.home-open-row') as Element).flexDirection)).toBe('column');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const button = page.getByRole('button', { name: 'Open', exact: true });
+  const card = await page.locator('.card').boundingBox();
+  const target = await button.boundingBox();
+  expect(target && card && target.x >= card.x && target.x + target.width <= card.x + card.width + 1).toBe(true);
+  expect(target?.height).toBeGreaterThanOrEqual(44);
+});
