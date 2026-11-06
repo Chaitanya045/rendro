@@ -181,7 +181,10 @@ export function d1SearchIndex(db: SearchD1): SearchIndex {
     return migration;
   };
   /** The write side's guard: the schema is brought up to date once per isolate, before the first write. */
-  const migrate = (): Promise<void> => (migrations.get(db) ?? start()).ready;
+  // A block body: subprocess coverage cannot align this expression-bodied arrow's body across transforms.
+  const migrate = (): Promise<void> => {
+    return (migrations.get(db) ?? start()).ready;
+  };
   /** The read path's repair, after D1 said the schema is missing: join a migration in flight, else run one again. */
   const remigrate = (): Promise<void> => {
     const current = migrations.get(db);
