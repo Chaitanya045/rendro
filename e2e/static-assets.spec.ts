@@ -68,9 +68,11 @@ test.describe("public static assets", () => {
     }
   });
 
-  test("the shell asks for its first tree page before any script, once, and links its own stylesheet and script (#359)", async ({ page: tab, browserName }) => {
+  test("the shell asks for its first tree page before any script, once, and links its own stylesheet and script (#359)", async ({ page: tab, browserName, baseURL, seed }) => {
     // Other engines may or may not reuse a fetch preload; Chromium's reuse is the contract under test.
     test.skip(browserName !== "chromium", "fetch-preload reuse is asserted on Chromium");
+    // Every read needs a signed-in reader (#354), public repositories included.
+    await signInSeeded(tab.context(), baseURL, seed, "outsider");
     const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
     const requests: string[] = [];
     tab.on("request", request => { const url = new URL(request.url()); requests.push(url.pathname + url.search); });
