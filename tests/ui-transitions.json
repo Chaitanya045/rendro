@@ -3931,7 +3931,7 @@
             },
             {
               "file": "e2e/repo-comment-permissions.spec.ts",
-              "name": "an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write",
+              "name": "an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete",
               "kind": "e2e"
             }
           ]
@@ -4879,7 +4879,7 @@
             },
             {
               "file": "e2e/repo-comment-permissions.spec.ts",
-              "name": "an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write",
+              "name": "an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete",
               "kind": "e2e"
             }
           ]
@@ -4967,12 +4967,12 @@
           "tests": [
             {
               "file": "e2e/repo-comments.spec.ts",
-              "name": "an anonymous reader of a public repository sees its comments but cannot post",
+              "name": "a public repository has no comments: no widget, no configuration, no access, and Convex refuses it too (#353)",
               "kind": "e2e"
             },
             {
               "file": "e2e/repo-comment-permissions.spec.ts",
-              "name": "an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write",
+              "name": "an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete",
               "kind": "e2e"
             }
           ]
@@ -11373,9 +11373,9 @@
         },
         {
           "id": "UI-163-E08",
-          "from": "An anonymous reader of a public repository document",
+          "from": "A reader of a public repository document",
           "trigger": "Open the page, select text",
-          "expected": "Pins and threads show; the Comment button is disabled and no chip opens; Convex refuses an anonymous write",
+          "expected": "No comment feature: no widget, no dock and no chip; the comment-access route is the plain 404; Convex refuses reads and writes",
           "inventoryRefs": [
             "UI-163"
           ],
@@ -11388,12 +11388,12 @@
             },
             {
               "file": "tests/repo-comments-host.test.ts",
-              "name": "lets an anonymous reader read, and never write or keep drafts",
+              "name": "answers no request of a shell with no signed-in reader: no read, no write, no draft (#353)",
               "kind": "unit"
             },
             {
               "file": "e2e/repo-comments.spec.ts",
-              "name": "an anonymous reader of a public repository sees its comments but cannot post",
+              "name": "a public repository has no comments: no widget, no configuration, no access, and Convex refuses it too (#353)",
               "kind": "e2e"
             }
           ]
@@ -11669,12 +11669,12 @@
             },
             {
               "file": "tests/repo-comments-convex.test.ts",
-              "name": "reads a public first page for the signed-in reader the Worker names, deciding access as the public grant does (#303)",
+              "name": "reads the first page for the grant's own reader, marking only their comments theirs (#303, #353)",
               "kind": "unit"
             },
             {
               "file": "tests/repo-comments-routes.test.ts",
-              "name": "hands a public repository's first page to anyone, read for the signed-in reader, never cacheable (#303)",
+              "name": "hands a private repository's first page to its reader only, at the epoch the read path checked",
               "kind": "unit"
             }
           ]

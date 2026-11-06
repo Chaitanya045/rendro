@@ -4,6 +4,7 @@ import { localHttp } from "./backend";
 import { password } from "./seed";
 import type { Mail } from "./services";
 import type { RepoFixtures } from "./repo-fixtures";
+import { becomeReader } from "./comment-helpers";
 
 test("sign up → verify → home → repository document → reactive comment", async ({ page, context, baseURL }, info) => {
   test.setTimeout(90_000);
@@ -31,8 +32,9 @@ test("sign up → verify → home → repository document → reactive comment",
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(/\/home$/);
   await expect(page.getByRole("heading", { name: "Welcome, Journey Author", level: 1 })).toBeVisible();
-  // Anyone signed in may comment on a public repository: the new account reads one and writes there at once.
-  const { viewer } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+  // Comments are for private repositories (#353): the new account, a GitHub reader of one, reads and writes there at once.
+  await becomeReader(page, "viewerPrivate");
+  const { viewerPrivate: viewer } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
   await page.goto(`/r/${viewer.owner}/${viewer.name}?doc=${encodeURIComponent("docs/comment.md")}`);
   const frame = page.frameLocator("#content-frame");
   await expect(frame.getByRole("heading", { name: "Comment page", level: 1 })).toBeVisible();

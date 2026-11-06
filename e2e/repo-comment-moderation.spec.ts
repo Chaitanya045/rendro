@@ -27,14 +27,14 @@ async function offers(page: Page, body: string) {
   return { resolve: await has("commentor-resolve-btn"), archive: await has("commentor-archive-btn"), delete: await has("commentor-delete-btn"), deleteReply: await has("commentor-delete-reply-btn") };
 }
 
-test("a maintainer archives and deletes other readers' comments; a writer cannot, and a demotion takes the rights back at once", async ({ actor, seeded }) => {
+test("a maintainer archives and deletes other readers' comments; a writer cannot, and a demotion takes the rights back at once", async ({ reader, seeded }) => {
   test.setTimeout(300_000);
   const { comments } = repos();
   const doc = await journeyDoc("moderation");
   const scope = { repoId: repoIds.comments, path: doc.path };
   expect(await memberRole("none")).toBe(202);
   try {
-    const author = await actor("moderation");
+    const author = await reader("moderation");
     await open(author.page, comments, doc.path, doc.commit);
     const authorToken = await sessionToken(author.page);
     const anchor = await anchorOn(author.page, "quick brown");

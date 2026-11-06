@@ -35,7 +35,8 @@ export interface ScopedDocumentShellOptions {
   /** Frames and tree pages load from here (a branch view pins its commit). */
   frameBase: string;
   selectedPath: string;
-  repoCommentConfig: RepoCommentConfig;
+  /** Private repositories only (#353): a public repository's shell carries no comment configuration. */
+  repoCommentConfig?: RepoCommentConfig;
   /** A private repository's frames load images through tickets only the shell may renew: the parent viewer, at the frames' base (#293). */
   privateViewerBase?: string;
   /** Real-user monitoring (#282), on the shell the read path serves. */

@@ -20,21 +20,21 @@ test.afterEach(({ cspViolations }) => {
 const toast = (page: Page, role: "status" | "alert") => ui(page).locator(`.toast[role="${role}"]`);
 const count = (page: Page) => ui(page).locator(".content-head .count");
 
-test("a deleted comment can be undone within its window and is then removed for good", async ({ actor, secondContext }) => {
+test("a deleted comment can be undone within its window and is then removed for good", async ({ reader }) => {
   test.setTimeout(180_000);
   const { comments } = repos();
   const doc = await journeyDoc("undo");
   const scope = { repoId: repoIds.comments, path: doc.path };
-  const author = await actor("undo");
+  const author = await reader("undo");
   // Only the test moves the clock while it matters: the five-second undo window and the toast's exit run on it.
   await author.page.clock.install();
   await open(author.page, comments, doc.path, doc.commit);
   const token = await sessionToken(author.page);
   await createThread(token, scope, "Gone soon", await anchorOn(author.page, "quick brown"));
   const staysId = await createThread(token, scope, "Stays", await anchorOn(author.page, "second paragraph"));
-  const reader = await secondContext.newPage();
-  await open(reader, comments, doc.path, doc.commit);
-  const me = ui(author.page), they = ui(reader);
+  const viewer = await reader("undo-viewer");
+  await open(viewer.page, comments, doc.path, doc.commit);
+  const me = ui(author.page), they = ui(viewer.page);
   await expect(pin(author.page, "Gone soon")).toBeVisible();
   await expect(pin(author.page, "Stays")).toBeVisible();
   await expect(they.getByTestId("commentor-pin")).toHaveCount(2);
@@ -68,20 +68,20 @@ test("a deleted comment can be undone within its window and is then removed for 
   await expect.poll(async () => (await threadsAs(token, scope)).map(thread => thread.body)).toEqual(["Stays"]);
   await expect(me.getByTestId("commentor-pin")).toHaveCount(1);
   await expect(they.getByTestId("commentor-pin")).toHaveCount(1);
-  await expect(count(reader)).toHaveAttribute("aria-label", "1 active comment");
-  expect((await threadsAs(undefined, scope))[0]._id).toBe(staysId);
+  await expect(count(viewer.page)).toHaveAttribute("aria-label", "1 active comment");
+  expect((await threadsAs(token, scope))[0]._id).toBe(staysId);
   // A deleted thread is gone for a reader who arrives later, too.
-  await open(reader, comments, doc.path, doc.commit);
-  await expect(pin(reader, "Stays")).toBeVisible();
+  await open(viewer.page, comments, doc.path, doc.commit);
+  await expect(pin(viewer.page, "Stays")).toBeVisible();
   await expect(they.getByTestId("commentor-pin")).toHaveCount(1);
 });
 
-test("the Active, Resolved and History views follow each comment's status, from the drawer and from the server", async ({ actor }) => {
+test("the Active, Resolved and History views follow each comment's status, from the drawer and from the server", async ({ reader }) => {
   test.setTimeout(180_000);
   const { comments } = repos();
   const doc = await journeyDoc("filters");
   const scope = { repoId: repoIds.comments, path: doc.path };
-  const author = await actor("filters");
+  const author = await reader("filters");
   const { page } = author;
   await open(page, comments, doc.path, doc.commit);
   const token = await sessionToken(page);
@@ -152,14 +152,16 @@ test("the Active, Resolved and History views follow each comment's status, from 
   await expect(me.locator(".empty strong")).toHaveText("No archived comments");
 });
 
-test("older threads and replies load on demand, and a comment arriving while scrolled away is offered, not forced", async ({ actor }) => {
+test("older threads and replies load on demand, and a comment arriving while scrolled away is offered, not forced", async ({ reader }) => {
   test.setTimeout(240_000);
   const { comments } = repos();
   const doc = await journeyDoc("paging");
   const scope = { repoId: repoIds.comments, path: doc.path };
-  const author = await actor("paging");
-  const helper = await actor("replier");
+  const author = await reader("paging");
+  const helper = await reader("replier");
   await open(author.page, comments, doc.path, doc.commit);
+  // A reader's grant is recorded when their shell asks for comment access, so the helper opens the page before writing.
+  await open(helper.page, comments, doc.path, doc.commit);
   const token = await sessionToken(author.page);
   const helperToken = await sessionToken(helper.page);
   const anchor = await anchorOn(author.page, "quick brown");
@@ -215,27 +217,26 @@ test("older threads and replies load on demand, and a comment arriving while scr
   await expect(card(author.page, "Late arrival")).toBeVisible();
 });
 
-test("an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them", async ({ actor, secondContext }) => {
+test("an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them", async ({ reader }) => {
   test.setTimeout(180_000);
   const { comments } = repos();
   const doc = await journeyDoc("edit");
   const scope = { repoId: repoIds.comments, path: doc.path };
-  const author = await actor("editor");
-  const other = await actor("bystander");
+  const author = await reader("editor");
+  const other = await reader("bystander");
   await open(author.page, comments, doc.path, doc.commit);
+  await open(other.page, comments, doc.path, doc.commit);
   const token = await sessionToken(author.page);
   const otherToken = await sessionToken(other.page);
   const threadId = await createThread(token, scope, "Frist take", await anchorOn(author.page, "quick brown"));
   const theirReply = await addReply(otherToken, scope, threadId, "Their reply");
   await open(other.page, comments, doc.path, doc.commit);
-  const anonymous = await secondContext.newPage();
-  await open(anonymous, comments, doc.path, doc.commit);
   // A reply posted after both readers opened reaches them only through their live subscriptions (the first comments
   // came with the page): once they show it, every later change does too.
   const myReply = await addReply(token, scope, threadId, "My reply");
-  for (const reader of [other.page, anonymous]) {
-    await openDrawer(reader);
-    await expect(card(reader, "Their reply").locator(".reply", { hasText: "My reply" })).toBeVisible({ timeout: 30_000 });
+  for (const seen of [other.page]) {
+    await openDrawer(seen);
+    await expect(card(seen, "Their reply").locator(".reply", { hasText: "My reply" })).toBeVisible({ timeout: 30_000 });
   }
   type Edited = { _id: string; body: string; editedAt?: number; canEdit?: boolean; replies: Array<{ _id: string; body: string; editedAt?: number; canEdit?: boolean }> };
   const server = async () => (await threadsAs(token, scope))[0] as unknown as Edited;
@@ -266,9 +267,9 @@ test("an author edits their thread and reply in place, another reader's page fol
   await expect(mine.getByTestId("commentor-edit-btn")).toBeFocused();
   await expect(me.getByTestId("commentor-live")).toHaveText("Edit saved.");
   expect(await server()).toMatchObject({ body: "First take", editedAt: expect.any(Number), canEdit: true });
-  for (const reader of [other.page, anonymous]) {
-    await expect(card(reader, "Their reply").locator(".thread-view > .body")).toHaveText("First take");
-    await expect(card(reader, "Their reply").locator(".thread-view > .head").getByTestId("commentor-edited")).toBeVisible();
+  for (const seen of [other.page]) {
+    await expect(card(seen, "Their reply").locator(".thread-view > .body")).toHaveText("First take");
+    await expect(card(seen, "Their reply").locator(".thread-view > .head").getByTestId("commentor-edited")).toBeVisible();
   }
 
   // The author's reply, with Ctrl+Enter.
@@ -282,19 +283,18 @@ test("an author edits their thread and reply in place, another reader's page fol
   await expect.poll(async () => (await server()).replies.find(reply => reply._id === myReply)?.body).toBe("My reply, corrected");
   await expect(card(other.page, "Their reply").locator(".reply", { hasText: "My reply, corrected" }).getByTestId("commentor-edited")).toBeVisible();
 
-  // Another signed-in reader may edit only their own reply; an anonymous reader nothing.
+  // Another reader may edit only their own reply.
   const theirs = card(other.page, "Their reply");
   await expect(theirs.getByTestId("commentor-edit-btn")).toHaveCount(0);
   await expect(theirs.getByTestId("commentor-edit-reply-btn")).toHaveCount(1);
   await expect(theirs.locator(".reply", { hasText: "Their reply" }).getByTestId("commentor-edit-reply-btn")).toHaveCount(1);
-  await expect(card(anonymous, "Their reply").locator('[data-testid="commentor-edit-btn"], [data-testid="commentor-edit-reply-btn"]')).toHaveCount(0);
 
   // The same edits forged against Convex are refused as the other writes are; nothing changes.
   const forged = [
     ["thread by another reader", await convexCallWith(otherToken, "mutation", "repoComments:editThread", { ...scope, threadId, body: "Hijacked" }), "forbidden"],
     ["reply by another reader", await convexCallWith(otherToken, "mutation", "repoComments:editReply", { ...scope, threadId, replyId: myReply, body: "Hijacked" }), "forbidden"],
     ["their reply by the author", await convexCallWith(token, "mutation", "repoComments:editReply", { ...scope, threadId, replyId: theirReply, body: "Hijacked" }), "forbidden"],
-    ["thread anonymously", await convexCallWith(undefined, "mutation", "repoComments:editThread", { ...scope, threadId, body: "Hijacked" }), "unauthenticated"],
+    ["thread by nobody signed in", await convexCallWith(undefined, "mutation", "repoComments:editThread", { ...scope, threadId, body: "Hijacked" }), "not_found"],
     ["another page's thread", await convexCallWith(token, "mutation", "repoComments:editThread", { ...scope, path: "docs/guide.md", threadId, body: "Hijacked" }), "not_found"],
   ] as const;
   for (const [label, result, code] of forged) expect(result, label).toMatchObject({ ok: false, code });

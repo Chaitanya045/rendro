@@ -43,15 +43,18 @@ export async function seedVisualWorkspace(input: {
   /** The internal signing secret of the local backend (auth ingress signatures). */
   secret: string;
   mail: Mail[];
-  /** The visual repository (public), already ingested. */
+  /** The seeded owner's session cookies (`name=value; …`): a GitHub collaborator, so the one who may comment (#353). */
+  ownerCookies: string;
+  /** The visual repository (private), already ingested. */
   repo: RepoFixture & { id: number };
   fetch: typeof fetch;
 }): Promise<VisualSeed> {
   assertLoopback(input.site);
   assertLoopback(input.convex);
   assertLoopback(input.worker);
-  const jar: VisualSeedCookie[] = [];
-  async function call<T>(path: string, data?: unknown): Promise<T> {
+  const crown: VisualSeedCookie[] = [];
+  const owner: VisualSeedCookie[] = input.ownerCookies.split("; ").map(pair => ({ name: pair.slice(0, pair.indexOf("=")), value: pair.slice(pair.indexOf("=") + 1) }));
+  async function call<T>(path: string, data?: unknown, jar: VisualSeedCookie[] = crown): Promise<T> {
     const request = new Request(`${input.site}${path}`, { method: data === undefined ? "GET" : "POST",
       headers: { Origin: input.worker, "Content-Type": "application/json", Cookie: cookieHeader(jar) },
       body: data === undefined ? undefined : JSON.stringify(data) });
@@ -78,13 +81,13 @@ export async function seedVisualWorkspace(input: {
 
   // The shell records the reader's comment access before the widget may write (#254); seeding does what it does.
   const docs = `/r/${input.repo.owner}/${input.repo.name}`;
-  const access = await input.fetch(`${input.worker}${docs}/comment-access`, { method: "POST", headers: { Origin: input.worker, Cookie: cookieHeader(jar) } });
+  const access = await input.fetch(`${input.worker}${docs}/comment-access`, { method: "POST", headers: { Origin: input.worker, Cookie: cookieHeader(owner) } });
   if (!access.ok) throw new Error(`Visual seed comment access failed (${access.status})`);
 
   // The comment widget renders each comment's age from the server's creation timestamp; every
   // rendered age is pinned to "five minutes" by fixing the page clock five minutes past the
   // earliest thread this seeding created.
-  const token = (await call<{ token?: string }>("/api/auth/convex/token")).token;
+  const token = (await call<{ token?: string }>("/api/auth/convex/token", undefined, owner)).token;
   if (!token) throw new Error("Visual seed could not obtain a Convex token");
   // The threads live on two reference pages no repo/* state renders, so those baselines keep their pages unpinned.
   const scope = { repoId: input.repo.id, path: "docs/reference/errors.md" };
@@ -125,7 +128,7 @@ export async function seedVisualWorkspace(input: {
 
   return {
     clockEpoch: Math.min(...created) + 300_000,
-    crown: { cookies: [...jar] },
+    crown: { cookies: [...crown] },
     docs,
   };
 }

@@ -13,11 +13,17 @@ export type ViewerSite = { owner: string; name: string; commit: string; /** `/r/
 /** `?doc=` value of a page in the repository: its path from the repository root. */
 export const doc = (path: string) => `docs/${path}`;
 
-export const test = base.extend<{ site: ViewerSite }>({
+export const test = base.extend<{ site: ViewerSite; privateSite: ViewerSite }>({
   // eslint-disable-next-line no-empty-pattern -- fixtures.ts uses the same Playwright idiom for zero dependencies
   site: async ({}, use) => {
     const { viewer } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
     await use({ ...viewer, docs: `/r/${viewer.owner}/${viewer.name}` });
+  },
+  /** The same pages in a private repository, whose readers may comment (#353). */
+  // eslint-disable-next-line no-empty-pattern -- as above
+  privateSite: async ({}, use) => {
+    const { viewerPrivate } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+    await use({ ...viewerPrivate, docs: `/r/${viewerPrivate.owner}/${viewerPrivate.name}` });
   },
 });
 

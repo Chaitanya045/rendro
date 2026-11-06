@@ -38,47 +38,103 @@ async function world() {
     return [name, { userId: user._id as string, sessionId: session._id as string }] as const;
   }))));
   const as = (name: "reader" | "other" | "nameless") => backend.withIdentity({ subject: users[name].userId, sessionId: users[name].sessionId });
-  const grant = (repoId: number, userId: string | null, options: { epoch?: number; ttl?: number } = {}) => backend.mutation(api.repoCommentAccess.grant, {
+  const grant = (repoId: number, userId: string, options: { epoch?: number; ttl?: number } = {}) => backend.mutation(api.repoCommentAccess.grant, {
     internalSecret, repoId, userId, epoch: options.epoch ?? 0, expiresAt: Date.now() + (options.ttl ?? 60_000),
   });
-  return { backend, users, as, grant, anonymous: backend };
+  // Every reader of the repository holds a grant of their own; the first answer is the reader's.
+  const grantAll = async (repoId: number, options: { epoch?: number; ttl?: number } = {}) => {
+    const answers = await Promise.all(Object.values(users).map(user => grant(repoId, user.userId, options)));
+    return answers[0];
+  };
+  return { backend, users, as, grant, grantAll, anonymous: backend };
 }
 
 const scope = (repoId: number, path = "docs/guide.md") => ({ repoId, path });
 
 describe("repository comment access (Convex boundary)", () => {
   it("records grants only through the internal secret, validates them and never lets one outlive five minutes", async () => {
-    const { backend, grant } = await world();
-    await expect(backend.mutation(api.repoCommentAccess.grant, { internalSecret: "wrong", repoId: PUBLIC, userId: null, epoch: 0, expiresAt: Date.now() + 1_000 }))
+    const { backend, users, grant } = await world();
+    const userId = users.reader.userId;
+    await expect(backend.mutation(api.repoCommentAccess.grant, { internalSecret: "wrong", repoId: PUBLIC, userId, epoch: 0, expiresAt: Date.now() + 1_000 }))
       .rejects.toThrow("Forbidden");
     for (const bad of [{ repoId: 0 }, { repoId: 1.5 }, { userId: "" }, { userId: "u".repeat(257) }, { epoch: -1 }, { epoch: 0.5 }, { expiresAt: 1.5 }]) {
-      await expect(backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId: PUBLIC, userId: null, epoch: 0, expiresAt: Date.now() + 1_000, ...bad }))
+      await expect(backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId: PUBLIC, userId, epoch: 0, expiresAt: Date.now() + 1_000, ...bad }))
         .rejects.toThrow("Invalid input");
     }
-    expect(await backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId: PUBLIC, userId: null, epoch: 0, expiresAt: Date.now() - 1 }))
+    expect(await backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId: PUBLIC, userId, epoch: 0, expiresAt: Date.now() - 1 }))
       .toEqual({ granted: false });
     const before = Date.now();
-    const answer = await grant(PUBLIC, null, { ttl: 60 * 60_000 });
+    const answer = await grant(PUBLIC, userId, { ttl: 60 * 60_000 });
     expect(answer.granted && answer.expiresAt - before).toBeLessThanOrEqual(GRANT_MAX_MS + 50);
     expect(await backend.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(1);
     // Extending an existing grant patches it; the pending expiry job re-schedules itself.
-    await grant(PUBLIC, null, { ttl: 2 * 60 * 60_000 });
+    await grant(PUBLIC, userId, { ttl: 2 * 60 * 60_000 });
     expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toHaveLength(1);
     expect(await backend.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(1);
     // A shorter grant never shortens one already held, and one barely longer is not written (it would re-run every query).
     const held = (await backend.run(ctx => ctx.db.query("repoCommentGrants").first()))!.expiresAt;
-    expect(await grant(PUBLIC, null, { ttl: 1_000 })).toEqual({ granted: true, expiresAt: held });
-    expect(await grant(PUBLIC, null, { ttl: GRANT_MAX_MS })).toEqual({ granted: true, expiresAt: held });
+    expect(await grant(PUBLIC, userId, { ttl: 1_000 })).toEqual({ granted: true, expiresAt: held });
+    expect(await grant(PUBLIC, userId, { ttl: GRANT_MAX_MS })).toEqual({ granted: true, expiresAt: held });
+  });
+
+  it("refuses a grant for anyone: comments exist on private repositories only (#353)", async () => {
+    const { backend, as } = await world();
+    await expect(backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId: PUBLIC, userId: null as never, epoch: 0, expiresAt: Date.now() + 1_000 }))
+      .rejects.toThrow();
+    expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toEqual([]);
+    expect(await backend.run(ctx => ctx.db.query("repoCommentRepos").collect())).toEqual([]);
+    // Nothing was recorded, so no one reads or writes there.
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toEqual([]);
+    await expect(as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "x", anchor: anchor() })).rejects.toThrow("Comment not found");
+  });
+
+  it("never reads a legacy open grant (userId null) as access, even one that is still held", async () => {
+    const { backend, anonymous, as } = await world();
+    await backend.run(async ctx => {
+      await ctx.db.insert("repoCommentRepos", { repoId: PUBLIC });
+      await ctx.db.insert("repoCommentGrants", { repoId: PUBLIC, userId: null, epoch: 0, expiresAt: Date.now() + 60_000 });
+      await ctx.db.insert("repoThreads", {
+        repoId: PUBLIC, path: "docs/guide.md", blobSha: BLOB, anchor: anchor(), authorId: "someone", body: "Hidden", resolved: false, archived: false, createdAt: 1, updatedAt: 1,
+      });
+    });
+    const threadId = (await backend.run(ctx => ctx.db.query("repoThreads").first()))!._id;
+    for (const viewer of [anonymous, as("reader"), as("other")]) {
+      expect(await viewer.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).toEqual({ page: [], isDone: true, continueCursor: "" });
+      expect(await viewer.query(api.repoComments.listReplies, { ...scope(PUBLIC), threadId, paginationOpts: pageOpts })).toEqual({ page: [], isDone: true, continueCursor: "" });
+    }
+    for (const call of [
+      () => anonymous.mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "x", anchor: anchor() }),
+      () => as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "x", anchor: anchor() }),
+      () => as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "x" }),
+    ]) await expect(call()).rejects.toThrow("Comment not found");
+  });
+
+  it("hides a repository's comments, without deleting them, once it stops getting grants (made public), and shows them when it is private again (#353)", async () => {
+    vi.useFakeTimers();
+    const { backend, users, as, grant } = await world();
+    await grant(PRIVATE, users.reader.userId, { ttl: 10_000 });
+    await as("reader").mutation(api.repoComments.createThread, { ...scope(PRIVATE), body: "Kept", anchor: anchor() });
+    // The Worker records no grant for a public repository: the last private grant runs out and the comments go dark.
+    vi.advanceTimersByTime(11_000);
+    await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toEqual([]);
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PRIVATE), paginationOpts: pageOpts })).page).toEqual([]);
+    await expect(as("reader").mutation(api.repoComments.createThread, { ...scope(PRIVATE), body: "x", anchor: anchor() })).rejects.toThrow("Comment not found");
+    expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toHaveLength(1);
+    // Private again: the next authorization grants, and the comment is back.
+    await grant(PRIVATE, users.reader.userId);
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PRIVATE), paginationOpts: pageOpts })).page).toEqual([expect.objectContaining({ body: "Kept" })]);
   });
 
   it("expires grants by a scheduled function, so queries never compare times", async () => {
     vi.useFakeTimers();
-    const { backend, anonymous, grant } = await world();
-    await grant(PUBLIC, null, { ttl: 10_000 });
-    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).isDone).toBe(true);
+    const { backend, as, users, grant } = await world();
+    const userId = users.reader.userId;
+    await grant(PUBLIC, userId, { ttl: 10_000 });
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).isDone).toBe(true);
     // Extended before the first job fires: the job finds a later expiry and re-schedules.
     vi.advanceTimersByTime(5_000);
-    await grant(PUBLIC, null, { ttl: 20_000 });
+    await grant(PUBLIC, userId, { ttl: 20_000 });
     vi.advanceTimersByTime(5_000);
     await backend.finishInProgressScheduledFunctions();
     expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toHaveLength(1);
@@ -86,30 +142,33 @@ describe("repository comment access (Convex boundary)", () => {
     await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
     expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toEqual([]);
     // A job for a grant already gone does nothing.
-    const grantId = await backend.run(ctx => ctx.db.insert("repoCommentGrants", { repoId: PUBLIC, userId: null, epoch: 0, expiresAt: 0 }));
+    const grantId = await backend.run(ctx => ctx.db.insert("repoCommentGrants", { repoId: PUBLIC, userId, epoch: 0, expiresAt: 0 }));
     await backend.run(ctx => ctx.db.delete(grantId));
     await backend.mutation(internal.repoCommentAccess.expireGrant, { grantId });
   });
 
-  it("lets anyone read a public repository's comments, and only signed-in readers write", async () => {
-    const { anonymous, as, grant } = await world();
-    await grant(PUBLIC, null);
+  it("lets a granted reader read and write, and an anonymous caller neither", async () => {
+    const { anonymous, as, grantAll } = await world();
+    await grantAll(PUBLIC);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: " Looks good ", anchor: anchor() });
-    const page = await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts });
+    const page = await as("other").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts });
     expect(page.page).toEqual([expect.objectContaining({
       _id: threadId, body: "Looks good", blobSha: BLOB, anchor: anchor(), path: "docs/guide.md", repoId: PUBLIC,
       resolved: false, archived: false, canDelete: false, authorName: "reader", authorEmail: "", replies: [], repliesHasMore: false,
     })]);
     expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0].canDelete).toBe(true);
-    await expect(anonymous.mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Drive-by", anchor: anchor() })).rejects.toThrow("Unauthenticated");
-    await expect(anonymous.mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Drive-by" })).rejects.toThrow("Unauthenticated");
+    // A caller who is not signed in reads the empty page and writes "not found", whatever grants the repository holds.
+    expect(await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).toEqual({ page: [], isDone: true, continueCursor: "" });
+    await expect(anonymous.mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Drive-by", anchor: anchor() })).rejects.toThrow("Comment not found");
+    await expect(anonymous.mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Drive-by" })).rejects.toThrow("Comment not found");
     await as("other").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Me too" });
-    expect((await anonymous.query(api.repoComments.listReplies, { ...scope(PUBLIC), threadId, paginationOpts: pageOpts })).page)
+    expect((await as("reader").query(api.repoComments.listReplies, { ...scope(PUBLIC), threadId, paginationOpts: pageOpts })).page)
       .toEqual([expect.objectContaining({ body: "Me too", authorName: "other", authorEmail: "", canDelete: false })]);
+    expect(await anonymous.query(api.repoComments.listReplies, { ...scope(PUBLIC), threadId, paginationOpts: pageOpts })).toEqual({ page: [], isDone: true, continueCursor: "" });
     // Invalid repository IDs read like repositories nobody may see.
-    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(0), paginationOpts: pageOpts })).page).toEqual([]);
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(0), paginationOpts: pageOpts })).page).toEqual([]);
     // Another document of the same repository is its own thread set.
-    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC, "docs/other.md"), paginationOpts: pageOpts })).page).toEqual([]);
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC, "docs/other.md"), paginationOpts: pageOpts })).page).toEqual([]);
   });
 
   it("denies a private repository's comments to everyone but the granted reader, revealing nothing", async () => {
@@ -137,8 +196,8 @@ describe("repository comment access (Convex boundary)", () => {
   });
 
   it("refuses cross-repository thread and reply IDs exactly like missing ones", async () => {
-    const { users, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { users, as, grant, grantAll } = await world();
+    await grantAll(PUBLIC);
     await grant(PRIVATE, users.reader.userId);
     const privateThread = await as("reader").mutation(api.repoComments.createThread, { ...scope(PRIVATE), body: "Secret", anchor: anchor() });
     const privateReply = await as("reader").mutation(api.repoComments.addReply, { ...scope(PRIVATE), threadId: privateThread, body: "Secret reply" });
@@ -161,8 +220,8 @@ describe("repository comment access (Convex boundary)", () => {
   });
 
   it("rejects forged anchors, invalid paths, oversized text and page sizes", async () => {
-    const { as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { as, grantAll } = await world();
+    await grantAll(PUBLIC);
     const create = (overrides: Record<string, unknown>) => as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "x", anchor: anchor(), ...overrides } as never);
     for (const bad of [
       { anchor: anchor({ blobSha: "nothex" }) }, { anchor: anchor({ blobSha: "A".repeat(40) }) },
@@ -190,21 +249,21 @@ describe("repository comment access (Convex boundary)", () => {
   });
 
   it("treats an identity whose session is gone as anonymous, and names deleted authors neutrally", async () => {
-    const { backend, users, as, grant } = await world();
+    const { backend, users, as, grant, grantAll } = await world();
     await grant(PRIVATE, users.reader.userId);
-    await grant(PUBLIC, null);
+    await grantAll(PUBLIC);
     const threadId = await as("other").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Soon orphaned", anchor: anchor() });
     await backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.deleteOne, { input: { model: "user", where: [{ field: "_id", value: users.other.userId }] } }));
     expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0])
       .toMatchObject({ _id: threadId, authorName: "Former reader" });
     await backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.deleteOne, { input: { model: "session", where: [{ field: "_id", value: users.reader.sessionId }] } }));
     expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PRIVATE), paginationOpts: pageOpts })).page).toEqual([]);
-    await expect(as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "x", anchor: anchor() })).rejects.toThrow("Unauthenticated");
+    await expect(as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "x", anchor: anchor() })).rejects.toThrow("Comment not found");
   });
 
-  it("rate limits writers per user, on public repositories too", async () => {
-    const { as, grant } = await world();
-    await grant(PUBLIC, null);
+  it("rate limits writers per user", async () => {
+    const { as, grantAll } = await world();
+    await grantAll(PUBLIC);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "first", anchor: anchor() });
     for (let index = 1; index < 30; index += 1) await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: `reply ${index}` });
     await expect(as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "one too many" })).rejects.toThrow(/rate/i);
@@ -335,8 +394,10 @@ describe("repository comment access (Convex boundary)", () => {
     const first = await snapshot();
     expect(first.page).toEqual(live.page);
     expect(first.page).toEqual([expect.objectContaining({ body: "Mine", clientOperationId: "op-1", canDelete: true, authorName: "reader", authorEmail: "" })]);
-    // A public page names no reader: nothing in it is anyone's to delete.
-    expect((await snapshot({ userId: null })).page).toEqual([expect.objectContaining({ canDelete: false })]);
+    // Comments exist on private repositories only (#353): the page is never read for "anyone", nor for a malformed reader.
+    await expect(snapshot({ userId: null })).rejects.toThrow();
+    await expect(snapshot({ userId: "x".repeat(257) })).rejects.toThrow("Invalid input");
+    await expect(snapshot({ viewerId: users.reader.userId })).rejects.toThrow();
     expect((await snapshot({ path: "docs/other.md" })).page).toEqual([]);
     // Decided before a revocation Convex already holds: refused, as the grant would be.
     await backend.mutation(api.repoCommentAccess.revokeUser, { internalSecret, userId: users.reader.userId, epoch: 20 });
@@ -347,54 +408,52 @@ describe("repository comment access (Convex boundary)", () => {
     expect((await snapshot({ epoch: 20 })).page).toEqual([]);
   });
 
-  it("reads a public first page for the signed-in reader the Worker names, deciding access as the public grant does (#303)", async () => {
-    const { backend, users, as, grant } = await world();
-    const snapshot = (args: Record<string, unknown> = {}) => backend.query(api.repoComments.threadSnapshot, {
-      internalSecret, ...scope(PUBLIC), userId: null, epoch: 0, ...args,
+  it("reads the first page for the grant's own reader, marking only their comments theirs (#303, #353)", async () => {
+    const { backend, users, as, grantAll } = await world();
+    const snapshot = (userId: string, args: Record<string, unknown> = {}) => backend.query(api.repoComments.threadSnapshot, {
+      internalSecret, ...scope(PUBLIC), userId, epoch: 0, ...args,
     } as never);
-    // A viewer only says whom a page is read for: it never names a reader for a grant that already has one.
-    for (const bad of [{ viewerId: "" }, { viewerId: "x".repeat(257) }, { userId: users.reader.userId, viewerId: users.reader.userId }]) {
-      await expect(snapshot(bad)).rejects.toThrow("Invalid input");
-    }
-    await grant(PUBLIC, null);
+    await grantAll(PUBLIC);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Mine", anchor: anchor() });
     await as("other").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Theirs" });
     await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Mine too" });
     const live = await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts });
     // The author's page is the one their live subscription gives them: their thread and reply are theirs to delete.
-    const mine = await snapshot({ viewerId: users.reader.userId });
+    const mine = await snapshot(users.reader.userId);
     expect(mine.page).toEqual(live.page);
     expect(mine.page).toEqual([expect.objectContaining({ body: "Mine", canDelete: true, replies: [
       expect.objectContaining({ body: "Theirs", canDelete: false }), expect.objectContaining({ body: "Mine too", canDelete: true }),
     ] })]);
-    // Another reader's page holds the same thread, with only their own reply theirs; the anonymous page, nothing.
-    expect((await snapshot({ viewerId: users.other.userId })).page).toEqual([expect.objectContaining({ body: "Mine", canDelete: false, replies: [
+    // Another reader's page holds the same thread, with only their own reply theirs.
+    expect((await snapshot(users.other.userId)).page).toEqual([expect.objectContaining({ body: "Mine", canDelete: false, replies: [
       expect.objectContaining({ body: "Theirs", canDelete: true }), expect.objectContaining({ body: "Mine too", canDelete: false }),
     ] })]);
-    expect((await snapshot()).page).toEqual([expect.objectContaining({ body: "Mine", canDelete: false, replies: [
-      expect.objectContaining({ body: "Theirs", canDelete: false }), expect.objectContaining({ body: "Mine too", canDelete: false }),
+    // A moderator's page (the Worker's word, #259) offers Delete on everyone's comments.
+    expect((await snapshot(users.other.userId, { moderator: true })).page).toEqual([expect.objectContaining({ body: "Mine", canDelete: true, replies: [
+      expect.objectContaining({ canDelete: true }), expect.objectContaining({ canDelete: true }),
     ] })]);
-    // A revocation of the reader elsewhere changes nothing here: the page is public, so anyone may read it.
+    // A revocation Convex already holds refuses what the grant would, whoever the page is for.
     await backend.mutation(api.repoCommentAccess.revokeUser, { internalSecret, userId: users.reader.userId, epoch: 20 });
-    expect((await snapshot({ viewerId: users.reader.userId })).page).toHaveLength(1);
-    // What the grant refuses, the snapshot refuses, whoever it is read for: a removed repository shows nothing.
+    expect((await snapshot(users.reader.userId)).page).toEqual([]);
+    expect((await snapshot(users.reader.userId, { epoch: 20 })).page).toHaveLength(1);
+    // A removed repository shows nothing, and no grant brings it back at once.
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
-    expect((await snapshot({ viewerId: users.reader.userId })).page).toEqual([]);
-    expect(await grant(PUBLIC, null)).toEqual({ granted: false });
+    expect((await snapshot(users.other.userId)).page).toEqual([]);
+    expect(await backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId: PUBLIC, userId: users.other.userId, epoch: 0, expiresAt: Date.now() + 1_000 })).toEqual({ granted: false });
   });
 
   it("checks a writer's grant expiry in the mutation even before the expiry job ran", async () => {
     vi.useFakeTimers();
-    const { as, grant } = await world();
-    await grant(PUBLIC, null, { ttl: 1_000 });
+    const { as, grantAll } = await world();
+    await grantAll(PUBLIC, { ttl: 1_000 });
     vi.advanceTimersByTime(2_000);
     await expect(as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "late", anchor: anchor() })).rejects.toThrow("Comment not found");
   });
 
   it("hides an uninstalled repository's comments at once and purges them only when asked after the retention window", async () => {
     vi.useFakeTimers();
-    const { backend, users, anonymous, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, users, as, grant, grantAll } = await world();
+    await grantAll(PUBLIC);
     await grant(PUBLIC, users.reader.userId);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Keep?", anchor: anchor() });
     await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Reply" });
@@ -402,10 +461,10 @@ describe("repository comment access (Convex boundary)", () => {
     await expect(backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [0] })).rejects.toThrow("Invalid input");
     await expect(backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: Array.from({ length: 101 }, (_, index) => index + 1) })).rejects.toThrow("Invalid input");
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC, PUBLIC, OTHER] });
-    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toEqual([]);
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toEqual([]);
     expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toEqual([]);
     // A grant decided just before the removal does not bring the comments back...
-    expect(await grant(PUBLIC, null)).toEqual({ granted: false });
+    expect(await grantAll(PUBLIC)).toEqual({ granted: false });
     // ...and removing again keeps the first removal time.
     const removedAt = (await backend.run(ctx => ctx.db.query("repoCommentRepos").first()))!.removedAt!;
     vi.advanceTimersByTime(1_000);
@@ -431,9 +490,9 @@ describe("repository comment access (Convex boundary)", () => {
 
   it("purges only through the internal secret, and names what Convex's own window still keeps", async () => {
     vi.useFakeTimers();
-    const { backend, as, grant } = await world();
-    await grant(PUBLIC, null);
-    await grant(OTHER, null);
+    const { backend, as, grantAll } = await world();
+    await grantAll(PUBLIC);
+    await grantAll(OTHER);
     await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Early", anchor: anchor() });
     for (const name of ["purgeRepos", "restoreRepos"] as const) {
       await expect(backend.mutation(api.repoCommentAccess[name], { internalSecret: "wrong", repoIds: [PUBLIC] })).rejects.toThrow("Forbidden");
@@ -456,8 +515,8 @@ describe("repository comment access (Convex boundary)", () => {
 
   it("restores a repository GitHub still grants: its comments show again and a running purge stops", async () => {
     vi.useFakeTimers();
-    const { backend, anonymous, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, users, as, grantAll } = await world();
+    await grantAll(PUBLIC);
     await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Replayed", anchor: anchor() });
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
     const removedAt = Date.now();
@@ -474,21 +533,23 @@ describe("repository comment access (Convex boundary)", () => {
     expect((await backend.run(ctx => ctx.db.query("auditEvents").collect())).map(event => [event.action, event.resourceId, event.metadata as unknown]))
       .toEqual([["repository.comments_purged", String(PUBLIC), { removedAt }], ["repository.removal_reverted", String(PUBLIC), { removedAt }]]);
     // Readers come back through grants as before; restoring a visible repository again records nothing.
-    expect((await grant(PUBLIC, null)).granted).toBe(true);
-    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toHaveLength(1);
+    expect((await grantAll(PUBLIC)).granted).toBe(true);
+    // (The sessions lapsed with the thirty days, so the page is read as the Worker's first page is: for the grant's reader.)
+    const snapshot = await backend.query(api.repoComments.threadSnapshot, { internalSecret, ...scope(PUBLIC), userId: users.reader.userId, epoch: 0 });
+    expect(snapshot.page).toHaveLength(1);
     await backend.mutation(api.repoCommentAccess.restoreRepos, { internalSecret, repoIds: [PUBLIC] });
     expect(await backend.run(ctx => ctx.db.query("auditEvents").collect())).toHaveLength(2);
   });
 
   it("keeps a reinstalled repository's comments: a later grant cancels the purge", async () => {
     vi.useFakeTimers();
-    const { backend, anonymous, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, as, grantAll } = await world();
+    await grantAll(PUBLIC);
     await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Survives", anchor: anchor() });
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
     vi.advanceTimersByTime(REMOVAL_SETTLE_MS + 1);
-    expect((await grant(PUBLIC, null)).granted).toBe(true);
-    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toHaveLength(1);
+    expect((await grantAll(PUBLIC)).granted).toBe(true);
+    expect((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toHaveLength(1);
     vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS);
     // Nothing hidden: a confirmed purge has nothing to do.
     expect(await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] })).toEqual({ notDue: [] });
@@ -498,12 +559,12 @@ describe("repository comment access (Convex boundary)", () => {
 
   it("clears a confirmed purge when a later grant brings the repository back", async () => {
     vi.useFakeTimers();
-    const { backend, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, grantAll } = await world();
+    await grantAll(PUBLIC);
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
     vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS);
     await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] });
-    expect((await grant(PUBLIC, null)).granted).toBe(true);
+    expect((await grantAll(PUBLIC)).granted).toBe(true);
     expect(await backend.run(async ctx => {
       const row = await ctx.db.query("repoCommentRepos").first();
       return [row?.removedAt ?? null, row?.purgeConfirmedAt ?? null];
@@ -512,8 +573,8 @@ describe("repository comment access (Convex boundary)", () => {
 
   it("purges a large repository in bounded batches", async () => {
     vi.useFakeTimers();
-    const { backend, users, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, users, grantAll } = await world();
+    await grantAll(PUBLIC);
     await backend.run(async ctx => {
       for (let index = 0; index < PURGE_THREAD_BATCH + 2; index += 1) {
         const threadId = await ctx.db.insert("repoThreads", {
@@ -536,8 +597,8 @@ describe("repository comment access (Convex boundary)", () => {
 
   it("removes many grants of one repository in batches", async () => {
     vi.useFakeTimers();
-    const { backend, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, grantAll } = await world();
+    await grantAll(PUBLIC);
     await backend.run(async ctx => {
       for (let index = 0; index < REVOKE_BATCH + 2; index += 1) await ctx.db.insert("repoCommentGrants", { repoId: PUBLIC, userId: `user-${index}`, epoch: 0, expiresAt: Date.now() + 60_000 });
     });
@@ -555,19 +616,19 @@ describe("editing repository comments (#287)", () => {
   const editReply = (viewer: Viewer, args: Record<string, unknown>) => viewer.mutation(api.repoComments.editReply, args as never);
 
   it("lets only the author edit a thread or a reply, whatever its status, and shows every reader the edit", async () => {
-    const { backend, users, anonymous, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, users, anonymous, as, grantAll } = await world();
+    await grantAll(PUBLIC);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Frist", anchor: anchor() });
     const theirs = await as("other").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Theirs" });
     const mine = await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Mine" });
-    const before = (await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0];
+    const before = (await as("nameless").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0];
     expect(before).toMatchObject({ canEdit: false, canDelete: false });
     expect(before.editedAt).toBeUndefined();
     expect(await edit(as("reader"), { ...scope(PUBLIC), threadId, body: " First ", clientOperationId: "edit-1" })).toBeNull();
     expect(await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: mine, body: "Mine, edited" })).toBeNull();
     // Every reader sees the new text and when it changed; only its author may edit it again.
     const page = async (viewer: Pick<typeof anonymous, "query">) => (await viewer.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0];
-    const read = await page(anonymous);
+    const read = await page(as("nameless"));
     expect(read).toMatchObject({ body: "First", editedAt: expect.any(Number), editOperationId: "edit-1", canEdit: false });
     expect(read.replies.map(reply => [reply.body, Boolean(reply.editedAt), reply.canEdit])).toEqual([["Theirs", false, false], ["Mine, edited", true, false]]);
     expect(read.replies[1].editOperationId).toBeUndefined();
@@ -578,20 +639,20 @@ describe("editing repository comments (#287)", () => {
     expect((await as("other").query(api.repoComments.listReplies, { ...scope(PUBLIC), threadId, paginationOpts: pageOpts })).page
       .map(reply => [reply.body, reply.canEdit, typeof reply.editedAt])).toEqual([["Mine, edited", false, "number"], ["Theirs", true, "undefined"]]);
     // The Worker's first page (#284, #303) is the same page, read for the reader it names.
-    const snapshot = await backend.query(api.repoComments.threadSnapshot, { internalSecret, ...scope(PUBLIC), userId: null, epoch: 0, viewerId: users.reader.userId });
+    const snapshot = await backend.query(api.repoComments.threadSnapshot, { internalSecret, ...scope(PUBLIC), userId: users.reader.userId, epoch: 0 });
     expect(snapshot.page).toEqual((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page);
-    // A forged edit of someone else's comment is refused as archive and delete are; an anonymous one asks to sign in.
+    // A forged edit of someone else's comment is refused as archive and delete are; a caller who is not signed in finds no comment.
     await expect(edit(as("other"), { ...scope(PUBLIC), threadId, body: "Hijacked" })).rejects.toThrow("Forbidden");
     await expect(editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: theirs, body: "Hijacked" })).rejects.toThrow("Forbidden");
-    await expect(anonymous.mutation(api.repoComments.editThread, { ...scope(PUBLIC), threadId, body: "Drive-by" })).rejects.toThrow("Unauthenticated");
-    await expect(anonymous.mutation(api.repoComments.editReply, { ...scope(PUBLIC), threadId, replyId: mine, body: "Drive-by" })).rejects.toThrow("Unauthenticated");
+    await expect(anonymous.mutation(api.repoComments.editThread, { ...scope(PUBLIC), threadId, body: "Drive-by" })).rejects.toThrow("Comment not found");
+    await expect(anonymous.mutation(api.repoComments.editReply, { ...scope(PUBLIC), threadId, replyId: mine, body: "Drive-by" })).rejects.toThrow("Comment not found");
     // Resolved or archived, like replies and resolving: the author may still correct it.
     await as("other").mutation(api.repoComments.resolve, { ...scope(PUBLIC), threadId, resolved: true });
     await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "Resolved, edited" });
     await as("reader").mutation(api.repoComments.archive, { ...scope(PUBLIC), threadId, archived: true });
     await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "Archived, edited" });
     await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: mine, body: "Archived reply, edited" });
-    const archived = await page(anonymous);
+    const archived = await page(as("nameless"));
     expect([archived.body, archived.resolved, archived.archived, archived.replies[1].body]).toEqual(["Archived, edited", true, true, "Archived reply, edited"]);
     // An edit without an operation clears the last one's, so no later echo is mistaken for it.
     expect(archived.editOperationId).toBeUndefined();
@@ -600,8 +661,8 @@ describe("editing repository comments (#287)", () => {
   });
 
   it("validates an edit's text as a create does, and its target as every other write does", async () => {
-    const { backend, users, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, users, as, grant, grantAll } = await world();
+    await grantAll(PUBLIC);
     await grant(PRIVATE, users.reader.userId);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Thread", anchor: anchor() });
     const replyId = await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Reply" });
@@ -634,8 +695,8 @@ describe("editing repository comments (#287)", () => {
   });
 
   it("deduplicates a retried edit, and spends the write quota only on an edit that writes", async () => {
-    const { backend, as, grant } = await world();
-    await grant(PUBLIC, null);
+    const { backend, as, grantAll } = await world();
+    await grantAll(PUBLIC);
     const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "v0", anchor: anchor() });
     const replyId = await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "r0" });
     await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "v1", clientOperationId: "op-1" });

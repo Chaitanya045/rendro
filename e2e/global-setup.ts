@@ -169,7 +169,7 @@ export default async function globalSetup(config?: FullConfig) {
     if (process.env.RENDRO_E2E_VISUAL === "1") {
       const visualRepo = repos.fixtures.visual;
       if (!visualRepo || !world.repos.visual) throw new Error("The visual repository was not ingested");
-      const visual = await seedVisualWorkspace({ site: convex.site, convex: convex.origin, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail,
+      const visual = await seedVisualWorkspace({ site: convex.site, convex: convex.origin, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, ownerCookies: seed.cookies.owner,
         repo: { ...visualRepo, id: world.repos.visual.id }, fetch: originalFetch });
       const visualPath = join(directory, "visual.json");
       await writeFile(visualPath, JSON.stringify(visual), { mode: 0o600 });

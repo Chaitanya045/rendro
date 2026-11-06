@@ -8,21 +8,21 @@
  * at most the five-minute capability), and P5 deletes it on a revocation epoch
  * or an uninstall. See docs/TECHNICAL.md, "Comments on repository docs".
  *
- * The frame half lives here too: the widget's configuration is the same for
- * every reader (frames are cached), so who may write is the shell's to say.
+ * Comments exist on private repositories only (#353). The frame half lives here
+ * too: a private frame is per reader, and the widget's configuration is the same
+ * for all of them; who may write is the shell's to say.
  */
 import { convexMutationRequired, convexQueryRequired } from "@/convex-internal";
 import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import { escapeHtml } from "@/routes/html";
 import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import type { ManifestFile } from "@/ingest/orchestrator/snapshot";
-import type { ModerationRole, RepoModerationSource, RevocationEpochs } from "./access";
+import type { ModerationRole, RepoModerationSource } from "./access";
 import type { RepoGrant } from "./grant";
 
 export interface CommentGrantInput {
   repoId: number;
-  /** null: the repository is public, so the grant is for anyone. */
-  userId: string | null;
+  userId: string;
   epoch: number;
   expiresAt: number;
 }
@@ -62,7 +62,7 @@ export type CommentSnapshot = { page: unknown[]; isDone: boolean };
 
 export interface CommentSnapshots {
   /** The page Convex gives this reader, or null when its answer is malformed. Throws when it could not be asked. */
-  threads(input: { repoId: number; path: string; userId: string | null; epoch: number; viewerId?: string; moderator?: true }): Promise<CommentSnapshot | null>;
+  threads(input: { repoId: number; path: string; userId: string; epoch: number; moderator?: true }): Promise<CommentSnapshot | null>;
 }
 
 /** Convex's `repoComments:threadSnapshot`, called with the internal secret. */
@@ -74,24 +74,24 @@ export const convexCommentSnapshots: CommentSnapshots = {
 };
 
 /**
- * The first thread page for an authorized reader, decided as the grant is (the reader alone, or anyone for a public
- * repository). A public page is read for `reader`, the signed-in reader when there is one (#303), so their own threads
- * carry their Archive and Delete from the first paint; a private page is always read for the grant's reader.
+ * The reader comments are offered to (#353): a private repository's own reader. Null when there are none to offer: a
+ * public repository has no comments, and the serving Worker records no grant, snapshot or moderator for it.
  */
-export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string, reader: string | null, moderator = false): Promise<CommentSnapshot | null> {
-  // The page says which comments the reader may archive or delete: a moderator's role (#259) widens that to everyone's.
-  const role = moderator && (grant.repo.private ? grant.viewer : reader) !== null ? { moderator: true as const } : {};
-  if (grant.repo.private) return snapshots.threads({ repoId: grant.repo.id, path, userId: grant.viewer, epoch: grant.epoch, ...role });
-  return snapshots.threads({ repoId: grant.repo.id, path, userId: null, epoch: grant.epoch, ...(reader ? { viewerId: reader } : {}), ...role });
+export function commentReader(grant: RepoGrant): string | null {
+  return grant.repo.private ? grant.viewer : null;
 }
 
-/** Comment access is decided afresh when the authorization behind it would end sooner (a capability or public memory near
- * its end), so every grant lasts at least this long and the shell, renewing halfway, never sees one lapse. */
+/** The first thread page for `viewer`, the private repository's reader the grant is for; a moderator's role (#259) widens which comments it offers to archive or delete. */
+export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string, viewer: string, moderator = false): Promise<CommentSnapshot | null> {
+  return snapshots.threads({ repoId: grant.repo.id, path, userId: viewer, epoch: grant.epoch, ...(moderator ? { moderator: true as const } : {}) });
+}
+
+/** Comment access is decided afresh when the authorization behind it would end sooner (a capability near its end), so every grant lasts at least this long and the shell, renewing halfway, never sees one lapse. */
 export const COMMENT_GRANT_MIN_MS = 30_000;
 /** A shell renews when half its grant has passed; a grant still this fresh is not recorded again. */
 const REUSE_FRACTION = 0.5;
 const MAX_ENTRIES = 1_024;
-/** Per isolate: repository, reader and epoch → the expiry Convex holds, so many readers of one public repository make one write. */
+/** Per isolate: repository, reader and epoch → the expiry Convex holds, so a reader's renewals make one write. */
 const recorded = new Map<string, { expiresAt: number; ttl: number }>();
 
 export function clearCommentGrantMemory(): void {
@@ -101,12 +101,10 @@ export function clearCommentGrantMemory(): void {
 
 export type CommentAccess = { expiresAt: number };
 
-/** Record (or reuse) the Convex grant for an authorized reader. Null when there is nothing to grant or Convex refused. */
-export async function commentAccess(grants: CommentGrants, grant: RepoGrant, now: number): Promise<CommentAccess | null> {
+/** Record (or reuse) the Convex grant for `userId`, the authorized reader of a private repository. Null when there is nothing to grant or Convex refused. */
+export async function commentAccess(grants: CommentGrants, grant: RepoGrant, userId: string, now: number): Promise<CommentAccess | null> {
   if (grant.until <= now) return null;
-  // A private grant is the reader's alone; a public one is anyone's, so it never names a reader.
-  const userId = grant.repo.private ? grant.viewer : null;
-  const key = `${grant.repo.id}\u0000${userId ?? ""}\u0000${grant.epoch}`;
+  const key = `${grant.repo.id}\u0000${userId}\u0000${grant.epoch}`;
   const known = recorded.get(key);
   if (known && known.expiresAt - now > known.ttl * REUSE_FRACTION) return { expiresAt: known.expiresAt };
   const expiresAt = await grants.record({ repoId: grant.repo.id, userId, epoch: grant.epoch, expiresAt: grant.until });
@@ -128,7 +126,6 @@ export interface ModeratorDecision {
 
 export interface ModerationSources {
   roles: RepoModerationSource;
-  epochs: RevocationEpochs;
 }
 
 /** Per isolate: repository, reader and epoch → their role (null: none) and the expiry the decision holds until. */
@@ -145,15 +142,14 @@ function rememberModerator(key: string, entry: { role: ModerationRole | null; ex
 }
 
 /**
- * The moderation role of `viewer`, the signed-in reader of an authorized grant, on its repository (#259), asked of
- * the control Worker's mirror (never taken from the request). A private grant is the reader's own, at the epoch its
- * authorization rested on; a public one names no reader, so the reader's own epoch is read before the role is asked,
- * and Convex refuses what a later revocation already overtook. No role is the answer for no reader, for an
- * authorization about to end, and for a role the mirror cannot state: it throws only when it could not be asked.
+ * The moderation role of `viewer`, the reader of an authorized private grant, on its repository (#259), asked of the
+ * control Worker's mirror (never taken from the request) at the epoch the grant's authorization rested on. No role is
+ * the answer for an authorization about to end and for a role the mirror cannot state: it throws only when it could
+ * not be asked.
  */
-export async function moderatorDecision(sources: ModerationSources, grant: RepoGrant, viewer: string | null, now: number): Promise<ModeratorDecision | null> {
-  if (viewer === null || grant.until <= now) return null;
-  const epoch = grant.repo.private ? grant.epoch : await sources.epochs.currentEpoch(viewer);
+export async function moderatorDecision(sources: ModerationSources, grant: RepoGrant, viewer: string, now: number): Promise<ModeratorDecision | null> {
+  if (grant.until <= now) return null;
+  const epoch = grant.epoch;
   const key = moderatorKey(grant.repo.id, viewer, epoch);
   const known = moderators.get(key);
   if (known && known.expiresAt - now > known.ttl * REUSE_FRACTION) return known.role ? { viewer, role: known.role, epoch, recorded: true } : null;

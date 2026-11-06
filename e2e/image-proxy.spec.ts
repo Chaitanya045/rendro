@@ -37,9 +37,9 @@ test.describe("image proxy", () => {
     const pixel = `${imageHostOrigin}/pixel.png?run=${run}`;
     const svg = `${imageHostOrigin}/scripted.svg?run=${run}`;
 
-    const { comments, control } = repos();
+    const { commentsPublic: comments, control } = repos();
     const docPath = `docs/images-${run}.md`;
-    const committed = await fetch(`${control}/commit/comments`, { method: "POST", headers: { "Content-Type": "application/json" },
+    const committed = await fetch(`${control}/commit/comments-public`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ changes: { [docPath]: `# Proxied images\n\n![Pixel](${pixel})\n\n<img src="${svg}" alt="Vector" width="8" height="8">\n` } }) });
     expect(committed.status).toBe(200);
 

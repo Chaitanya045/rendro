@@ -27,7 +27,8 @@ export default defineSchema({
   // check that a grant exists, so they never read the clock.
   repoCommentGrants: defineTable({
     repoId: v.number(),
-    // null: the repository was public when granted; anyone may read.
+    // Always a reader (#353). Null only in legacy rows of the open public-repository grant: kept valid so old rows
+    // still load, never granted again and never read as a grant.
     userId: v.union(v.string(), v.null()),
     epoch: v.number(),
     expiresAt: v.number(),
@@ -37,8 +38,8 @@ export default defineSchema({
 
   // A reader's moderation role on a repository (#259): they may archive and delete other readers' comments there. It
   // is recorded by the serving Worker only, from the control Worker's answer, and ends exactly as a read grant does:
-  // at its expiry, on the user's revocation epoch, or when the repository is removed. A public repository's readers
-  // hold no per-user grant, so this is its own table rather than a field of a read grant.
+  // at its expiry, on the user's revocation epoch, or when the repository is removed. It is its own table rather
+  // than a field of a read grant.
   repoCommentModerators: defineTable({
     repoId: v.number(),
     userId: v.string(),

@@ -15,8 +15,11 @@
  *   that the app really lost the repository (#258): a removal webhook can be a
  *   replay. If GitHub still grants it, `restoreRepos` shows them again.
  *
- * A grant with `userId: null` records that the repository was public: anyone may
- * read, and signed-in users may write. Otherwise only that user may.
+ * Comments exist on private repositories only (#353): a grant names its reader, and only that user may read or write.
+ * `grant` refuses `userId: null`, and a legacy row with a null user (an old public repository's open grant, which
+ * dev data may still hold) is never read as a grant, so even a Worker that is bypassed or wrong cannot open a
+ * public repository's comments. A repository made public stops getting grants and its comments stay hidden (not
+ * deleted) while its private grants run out or end with the revocation epoch; made private again, they return.
  *
  * A moderator grant (#259) records that the control Worker's permission mirror gave this reader GitHub's admin or
  * maintain role on the repository: they may then archive and delete other readers' comments. It is recorded by the
@@ -69,7 +72,7 @@ function repoRow(ctx: Ctx, repoId: number): Promise<Doc<"repoCommentRepos"> | nu
   return ctx.db.query("repoCommentRepos").withIndex("by_repo", q => q.eq("repoId", repoId)).unique();
 }
 
-function grantRow(ctx: Ctx, repoId: number, userId: string | null): Promise<Doc<"repoCommentGrants"> | null> {
+function grantRow(ctx: Ctx, repoId: number, userId: string): Promise<Doc<"repoCommentGrants"> | null> {
   return ctx.db.query("repoCommentGrants").withIndex("by_repo_user", q => q.eq("repoId", repoId).eq("userId", userId)).unique();
 }
 
@@ -82,8 +85,8 @@ function epochRow(ctx: Ctx, userId: string): Promise<Doc<"repoCommentEpochs"> | 
 }
 
 export type RepoCommentReader = {
-  /** The signed-in reader, or null for an anonymous reader of a public repository. */
-  user: AuthUser | null;
+  /** The signed-in reader the grant names. */
+  user: AuthUser;
   /** The grant the decision rests on. */
   held: Doc<"repoCommentGrants">;
 };
@@ -105,32 +108,30 @@ export async function repoCommentReader(ctx: Ctx, repoId: number): Promise<RepoC
   const repo = await repoRow(ctx, repoId);
   if (!repo || repo.removedAt !== undefined) return null;
   const user = await signedInUser(ctx);
-  const open = await grantRow(ctx, repoId, null);
-  if (open) return { user, held: open };
   if (!user) return null;
   const held = await grantRow(ctx, repoId, user._id);
   return held ? { user, held } : null;
 }
 
 /**
- * May the serving Worker hand `userId` (null: anyone, for a public repository) the first page of comments on
+ * May the serving Worker hand `userId` the first page of comments on
  * `repoId`, which its own authorization just granted (#284)? It asks while recording the grant, before any grant
  * may exist here, so this refuses exactly what `grant` refuses: a removed repository, and a decision older than a
  * revocation Convex already holds.
  */
-export async function repoCommentSnapshotAllowed(ctx: Ctx, repoId: number, userId: string | null, epoch: number): Promise<boolean> {
-  if (!validRepoId(repoId) || (userId !== null && !validUserId(userId)) || !validEpoch(epoch)) publicError("invalid_input");
+export async function repoCommentSnapshotAllowed(ctx: Ctx, repoId: number, userId: string, epoch: number): Promise<boolean> {
+  if (!validRepoId(repoId) || !validUserId(userId) || !validEpoch(epoch)) publicError("invalid_input");
   const repo = await repoRow(ctx, repoId);
   if (!repo || repo.removedAt !== undefined) return false;
-  return userId === null || ((await epochRow(ctx, userId))?.epoch ?? 0) <= epoch;
+  return ((await epochRow(ctx, userId))?.epoch ?? 0) <= epoch;
 }
 
 /**
  * Whether `userId` holds a moderator grant on `repoId` (#259), for what a page shows. Reads storage only, never the
  * clock, like `repoCommentReader`: the expiry job deletes the grant, so a query changes exactly when it does.
  */
-export async function isRepoCommentModerator(ctx: Ctx, repoId: number, userId: string | null): Promise<boolean> {
-  return userId !== null && await moderatorRow(ctx, repoId, userId) !== null;
+export async function isRepoCommentModerator(ctx: Ctx, repoId: number, userId: string): Promise<boolean> {
+  return await moderatorRow(ctx, repoId, userId) !== null;
 }
 
 /**
@@ -144,11 +145,10 @@ export async function liveRepoCommentModerator(ctx: MutationCtx, repoId: number,
 }
 
 /** Writers must be signed in and hold a live grant; mutations may read the clock, so expiry is checked too. */
-export async function requireRepoCommentWriter(ctx: MutationCtx, repoId: number): Promise<RepoCommentReader & { user: AuthUser }> {
+export async function requireRepoCommentWriter(ctx: MutationCtx, repoId: number): Promise<RepoCommentReader> {
   const reader = await repoCommentReader(ctx, repoId);
   if (!reader || reader.held.expiresAt <= Date.now()) publicError("not_found");
-  if (!reader.user) publicError("unauthenticated");
-  return reader as RepoCommentReader & { user: AuthUser };
+  return reader;
 }
 
 /** The serving Worker's record of an authorization it just made. */
@@ -156,19 +156,18 @@ export const grant = mutation({
   args: {
     internalSecret: v.string(),
     repoId: v.number(),
-    userId: v.union(v.string(), v.null()),
+    userId: v.string(),
     epoch: v.number(),
     expiresAt: v.number(),
   },
   handler: async (ctx, args): Promise<{ granted: false } | { granted: true; expiresAt: number }> => {
     requireInternalSecret(args.internalSecret);
-    if (!validRepoId(args.repoId) || (args.userId !== null && !validUserId(args.userId))
-      || !validEpoch(args.epoch) || !Number.isSafeInteger(args.expiresAt)) publicError("invalid_input");
+    if (!validRepoId(args.repoId) || !validUserId(args.userId) || !validEpoch(args.epoch) || !Number.isSafeInteger(args.expiresAt)) publicError("invalid_input");
     const now = Date.now();
     const expiresAt = Math.min(args.expiresAt, now + GRANT_MAX_MS);
     if (expiresAt <= now) return { granted: false };
     // Decided before a revocation that already reached us: the reader no longer holds it.
-    if (args.userId !== null && ((await epochRow(ctx, args.userId))?.epoch ?? 0) > args.epoch) return { granted: false };
+    if (((await epochRow(ctx, args.userId))?.epoch ?? 0) > args.epoch) return { granted: false };
     const repo = await repoRow(ctx, args.repoId);
     if (!repo) await ctx.db.insert("repoCommentRepos", { repoId: args.repoId });
     else if (repo.removedAt !== undefined) {
