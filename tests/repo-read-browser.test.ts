@@ -7,7 +7,7 @@ import { gitBlobId } from "@/ingest/github/git-objects";
 import { r2Store, RepoContent } from "@/ingest/orchestrator/store";
 import { imageProxyPath } from "@/image-proxy";
 import worker from "@/worker";
-import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
+import { browserStep, browserStepTimeout, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 import { TEST_CONTENT_SEALER } from "./helpers/ingest-fixture";
 import { nonceContext } from "@/middleware/html-nonce";
 import { READINESS_HEADER, renderPreparingPage } from "@/repo-read/preparing";
@@ -206,7 +206,7 @@ describe("repository document frames in Chromium", () => {
       // `src` is what the renewal sets; `currentSrc` is what loaded, and is briefly empty while a new source loads.
       return { src: element.src, current: element.currentSrc, width: element.naturalWidth, base: document.querySelector("base") !== null };
     });
-    await expect.poll(async () => { const now = await image(); return now.current === now.src && now.width === 1; }).toBe(true);
+    await expect.poll(async () => { const now = await image(); return now.current === now.src && now.width === 1; }, { timeout: browserStepTimeout }).toBe(true);
     const first = await image();
     expect(first.base).toBe(false);
     expect(first.src).toContain(`${pinned}/view/`);
@@ -229,7 +229,7 @@ describe("repository document frames in Chromium", () => {
     const renewed = await image();
     expect(renewed.src).toMatch(new RegExp(`${pinned}/view/v1\\.[\\w-]+\\.[\\w-]+/files/docs/img/pixel\\.png$`));
     // The image reloads from the new ticket.
-    await expect.poll(async () => { const now = await image(); return now.current === renewed.src && now.width === 1; }).toBe(true);
+    await expect.poll(async () => { const now = await image(); return now.current === renewed.src && now.width === 1; }, { timeout: browserStepTimeout }).toBe(true);
     expect(requests).toContain(`${pinned}/viewer-ticket`);
     expect(requests).toContain(new URL(renewed.src).pathname);
     await page.close();
