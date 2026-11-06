@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,20 @@ function checkAssets(directory: string, base = "") {
   return spawnSync("sh", ["-c", scripts["verify:assets"]], { cwd: directory, encoding: "utf8", env: subprocessEnv({ ...process.env, ASSET_VERSION_BASE: base }) });
 }
 
+/**
+ * Links `relative` (a directory of the repository) into `directory` entry by entry, except along `own`:
+ * those paths are left for the test to write, so a fixture file never lands in the real checkout.
+ */
+function linkExcept(directory: string, relative: string, own: readonly string[]) {
+  mkdirSync(join(directory, relative), { recursive: true });
+  for (const name of readdirSync(join(root, relative))) {
+    const path = `${relative}/${name}`;
+    if (own.includes(path)) continue;
+    if (own.some((owned) => owned.startsWith(`${path}/`))) linkExcept(directory, path, own);
+    else symlinkSync(join(root, path), join(directory, path));
+  }
+}
+
 afterEach(() => { for (const directory of fixtures.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
 describe("repository quality gates", () => {
@@ -67,18 +81,21 @@ describe("repository quality gates", () => {
   it("runs the bundle budget CLI: fails growth beyond the recorded size until it is recorded", () => {
     const directory = mkdtempSync(join(tmpdir(), "rendro-budget-gate-"));
     fixtures.push(directory);
-    for (const path of ["scripts", "public/styles", "public/fonts", "src/ingest/comrak-engine"]) mkdirSync(join(directory, path), { recursive: true });
-    for (const name of ["verify-bundle-budget.ts", "bundle-budget.ts"]) symlinkSync(join(root, "scripts", name), join(directory, "scripts", name));
-    for (const name of ["routes", "viewer"]) symlinkSync(join(root, "src", name), join(directory, "src", name));
-    symlinkSync(join(root, "node_modules"), join(directory, "node_modules"));
+    for (const path of ["scripts", "public/styles", "public/fonts"]) mkdirSync(join(directory, path), { recursive: true });
+    for (const name of ["verify-bundle-budget.ts", "bundle-budget.ts", "worker-bundle.ts"]) symlinkSync(join(root, "scripts", name), join(directory, "scripts", name));
+    // The budget bundles the real Workers (#357), so their sources are linked; only the WASM file is the fixture's.
+    linkExcept(directory, "src", ["src/ingest/comrak-engine/comrak_engine_bg.wasm"]);
+    for (const name of ["shared", "convex", "node_modules", "tsconfig.json", "package.json"]) symlinkSync(join(root, name), join(directory, name));
     for (const name of assets) writeFileSync(join(directory, "public", name), "const version = 1;\n");
     writeFileSync(join(directory, "src/ingest/comrak-engine/comrak_engine_bg.wasm"), "\0asm");
     const run = (script: string) => spawnSync("sh", ["-c", scripts[script]], { cwd: directory, encoding: "utf8", env: subprocessEnv() });
 
-    expect(run("record:budget").status).toBe(0);
+    const recorded = run("record:budget");
+    expect(recorded.status, recorded.stdout + recorded.stderr).toBe(0);
     const verified = run("verify:budget");
     expect(verified.status, verified.stdout + verified.stderr).toBe(0);
-    expect(verified.stdout).toBe(`Bundle budget verified (${assets.length + 1} bundles, 1% tolerance).\n`);
+    // The browser bundles, the WASM engine and the serving Worker (#357).
+    expect(verified.stdout).toBe(`Bundle budget verified (${assets.length + 2} bundles, 1% tolerance).\n`);
     writeFileSync(join(directory, "public/commentor.js"), "const version = 1; // and a lot more weight than before\n");
     const grown = run("verify:budget");
     expect(grown.status).toBe(1);
