@@ -168,14 +168,21 @@ export function d1SearchIndex(db: SearchD1): SearchIndex {
       const rows = await db.prepare("SELECT 1 FROM sections WHERE repo_id = ? AND blob_sha = ? LIMIT 1").bind(repoId, blobSha).all();
       return rows.results.length > 0;
     },
-    async putBlob(repoId, blobSha, sections: readonly PageSection[]) {
+    async putBlob(repoId, blobSha, sections: readonly PageSection[], options) {
       await migrate();
-      await db.prepare("DELETE FROM sections WHERE repo_id = ? AND blob_sha = ?").bind(repoId, blobSha).run();
       const insert = "INSERT INTO sections (repo_id, blob_sha, slug, title, body) VALUES (?, ?, ?, ?, ?)";
-      for (let start = 0; start < sections.length; start += INSERT_CHUNK) {
-        await db.batch(sections.slice(start, start + INSERT_CHUNK)
-          .map(section => db.prepare(insert).bind(repoId, blobSha, section.slug, searchable(section.title), searchable(section.text))));
-      }
+      const rows = sections.map(section => db.prepare(insert).bind(repoId, blobSha, section.slug, searchable(section.title), searchable(section.text)));
+      // The DELETE rides in the first batch (one round trip, one transaction with the first rows); a blob known
+      // to have no rows skips it.
+      const first: SearchD1Statement[] = options?.replace === false ? [] : [db.prepare("DELETE FROM sections WHERE repo_id = ? AND blob_sha = ?").bind(repoId, blobSha)];
+      first.push(...rows.slice(0, INSERT_CHUNK));
+      if (first.length > 0) await db.batch(first);
+      // The first batch cleared the old rows; the rest are independent, so their round trips overlap. All settle
+      // before an error is raised, so none is still writing when the attempt is retried.
+      const rest: Array<Promise<unknown>> = [];
+      for (let start = INSERT_CHUNK; start < rows.length; start += INSERT_CHUNK) rest.push(db.batch(rows.slice(start, start + INSERT_CHUNK)));
+      const failed = (await Promise.allSettled(rest)).find(result => result.status === "rejected");
+      if (failed) throw failed.reason;
     },
     async query(repoId, match, limit) {
       await migrate();

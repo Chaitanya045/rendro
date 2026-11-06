@@ -20,6 +20,14 @@ required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"]
 enabled = true
 invocation_logs = false
 
+# CPU budget per invocation (#356). A first import renders every page inside one coordinator request, and each
+# page is built about twice (sanitize, then stabilize), so a large docs set can pass the Workers Paid default of
+# 30 s (30000 ms); the queue would then retry the whole job with backoff, from stored content. 120 s is four times
+# the default and well under the 300 s the Paid plan allows, so a runaway render still fails instead of burning
+# CPU. Not enforced in local development. Wall time is not limited by this; fetching and storage waits cost none.
+[limits]
+cpu_ms = 120000
+
 [[queues.producers]]
 binding = "INGEST_QUEUE"
 queue = "rendro-ingest"
@@ -56,6 +64,10 @@ required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"]
 [env.development.observability.logs]
 enabled = true
 invocation_logs = false
+
+# Same budget as production (inherited keys are repeated here like every other section).
+[env.development.limits]
+cpu_ms = 120000
 
 # Content cache: GitHub stays the source of truth (gh/v1/ key schema).
 [[env.development.r2_buckets]]

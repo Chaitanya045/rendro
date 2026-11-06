@@ -33,7 +33,16 @@ export class SqliteSearchD1 implements SearchD1 {
     return new SqliteStatement(this.database, sql);
   }
 
-  async batch(statements: readonly SearchD1Statement[]): Promise<unknown[]> {
+  /** Batches run one after another, as D1 applies them: overlapping calls queue instead of nesting transactions. */
+  private tail: Promise<unknown> = Promise.resolve();
+
+  batch(statements: readonly SearchD1Statement[]): Promise<unknown[]> {
+    const run = this.tail.then(() => this.transaction(statements));
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  private async transaction(statements: readonly SearchD1Statement[]): Promise<unknown[]> {
     this.database.exec("BEGIN");
     try {
       const results: unknown[] = [];
