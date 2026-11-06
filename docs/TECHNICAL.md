@@ -1375,7 +1375,7 @@ Every grant, to a public or a private repository, sets `__Host-rendro-repo.{repo
 |---|---|
 | `u`, `r`, `n` | Rendro user ID, GitHub repository ID, lower-cased `owner/name` |
 | `p`, `b` | Whether the repository was private, and its default branch, when granted. A background refresh at half life renews the cookie with the visibility GitHub states then |
-| `e` | The user's revocation epoch, read before the grant |
+| `e` | The user's revocation epoch, read before the grant. For a public repository (`p` false) the repository's visibility epoch is compared with `i` instead, since a public repository's readers are not holders the control Worker could bump |
 | `s` | Binding to the session cookie: an HMAC of the session-token cookie, so signing out or switching accounts invalidates it at once and no session material is stored |
 | `i`, `x` | Issued and expiry times (five minutes) |
 
@@ -1383,7 +1383,7 @@ Keys are derived per purpose from `REPO_CAPABILITY_SECRET` (`HMAC(secret, "rendr
 
 Authorization, in order:
 
-1. A valid cookie for this `owner/name` whose epoch is current: granted. Only the epoch store is read.
+1. A valid cookie for this `owner/name` whose epochs are current: granted. Only the epoch store is read: the user's epoch, and, when the cookie says the repository was public, its visibility epoch (`epoch:repo:<id>`, milliseconds) which must not be later than the cookie's issue time `i`. Both reads are issued together, so a cookie hit stays one round of KV reads. A private repository's cookie reads the user's epoch alone.
 2. Past half its lifetime, the cookie is still honoured, and a refresh (session, epoch, permission source) runs in `waitUntil`, one per session and repository at a time. Its result serves this isolate's next request with that session's cookie: a renewed cookie (with the visibility GitHub states now), or a denial that clears it. Another session of the same user is unaffected.
 3. Otherwise: the session (Convex, the middleware's 15 s cache), then the epoch, then the permission source. A request with no session, or one the backend no longer knows, is anonymous and reaches neither the epoch store nor the permission source (#354). Every grant mints a cookie.
 
@@ -1391,7 +1391,7 @@ An unknown answer from the session, the epoch store or the permission source is 
 
 ### Asset tickets for frames
 
-The document frame is an opaque sandbox (#79), and requests it makes carry no cookies. Every frame's repository images, public repositories' too (#354, so no frame is a response a shared cache could hold), therefore load from `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/…`, where the ticket is a capability for the same user and repository bound to that commit instead of a session. It lives five minutes, as long as the capability cookie (`TICKET_TTL_SECONDS`). Ticket requests check the signature, repository, commit and the epoch on every request.
+The document frame is an opaque sandbox (#79), and requests it makes carry no cookies. Every frame's repository images, public repositories' too (#354, so no frame is a response a shared cache could hold), therefore load from `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/…`, where the ticket is a capability for the same user and repository bound to that commit instead of a session. It lives five minutes, as long as the capability cookie (`TICKET_TTL_SECONDS`). Ticket requests check the signature, repository, commit and the epochs on every request: the user's, and, for a ticket for a public repository, the repository's visibility epoch against the ticket's issue time, read together like the cookie's.
 
 A ticket carries the repository's visibility (`p`), like the cookie, so a ticketed public image opens as plaintext and a private one as sealed content. A ticket reaches images only (#293). The URL grammar has no page under `/view/{ticket}/`: such a path is the plain 404 of an unknown URL, with or without a cookie, before any session, ticket or storage read. Pages are always read with the cookie. The frame has no `<base>`, so its links, footnotes and fragments resolve against the frame's own cookie-authorized URL, and a link the reader middle-clicks, ctrl-clicks or copies is that URL, never a ticket. Only `img src` values that are relative to the document get the ticket prefix (`ticketImageSlots` in `frame.ts`). The split depends only on the render, so it is derived once per isolate, and each request joins it with its own ticket. Frame CSP is `base-uri 'none'`.
 
@@ -1399,7 +1399,7 @@ Renewal reuses the private viewer's protocol: the frame asks the trusted shell, 
 
 ### Revocation epochs, and the contract P5 implements
 
-`RevocationEpochs.currentEpoch(userId)` is read on every request that rests on a cookie or ticket, whatever the repository's visibility (#354). A capability minted at an older epoch is stale: the request falls through to the permission source, which re-mints or denies. The Worker reads `epoch:user:<userId>` from the `REPO_EPOCHS` KV namespace (decimal milliseconds; absent is 0; anything else is a 503) with `cacheTtl: 60`. The `user:` part keeps user epochs (which expire) apart from visibility epochs (`epoch:repo:<id>`, which must not), whatever a user ID looks like (#295).
+`RevocationEpochs.currentEpoch(userId)` is read on every request that rests on a cookie or ticket, whatever the repository's visibility (#354). A capability minted at an older epoch is stale: the request falls through to the permission source, which re-mints or denies (a stale ticket is denied). A capability for a public repository is also stale when the repository's visibility epoch is later than its issue time: random readers of a public repository are not holders the control Worker could bump, so the repository's own epoch covers them. An epoch store that cannot answer, either epoch, is a retryable 503, never a grant. The Worker reads `epoch:user:<userId>` from the `REPO_EPOCHS` KV namespace (decimal milliseconds; absent is 0; anything else is a 503) with `cacheTtl: 60`. The `user:` part keeps user epochs (which expire) apart from visibility epochs (`epoch:repo:<id>`, which must not), whatever a user ID looks like (#295).
 
 P5 implements this contract (#243): see [Repository Permission Mirror](#repository-permission-mirror-github-pivot-p5).
 
@@ -1407,7 +1407,7 @@ P5 implements this contract (#243): see [Repository Permission Mirror](#reposito
 - **The epoch bumps.** On `member`, `membership`, `team` (`added_to_repository`, `removed_from_repository`, `edited`), `organization.member_removed`, `repository` (`privatized`, `publicized`, `transferred`, `deleted`), `installation_repositories`, `installation` (`deleted`, `suspend`) and `github_app_authorization`: first update the mirror so `authorize` already denies, then write `epoch:user:<userId>` = the current time in milliseconds for every affected user. Write a time, not an increment: KV has no compare-and-swap, and a read-modify-write loses concurrent bumps. The order matters: the serving Worker reads the epoch before it asks for a grant, so a bump that lands in between leaves the new cookie already stale.
 - **The KV tier.** Revocation takes effect when the bumped epoch reaches the reader's colo. KV Classic propagates in about 60 s or more, and its colo cache (`cacheTtl`, at least 60 s) adds up to a minute, so expect 60–90 s, bounded above by the five-minute cookie in any case. KV Instant (private beta) replicates in under a second (p99 256 ms) and reads in about 1.6 ms, but allows 1 MB and one write per second per namespace, so it fits only if P5 stores just recently bumped epochs and batches writes.
 - **Grants webhooks do not cover** (enterprise policy, IdP sessions) end with the cookie's lifetime and the source's own mirror TTL.
-- **Repositories made private.** A reader of a public repository holds a cookie too (#354): it ends with the cookie's five minutes, or at its half-life refresh, whichever the reader reaches first, after the source already denies. The visibility epoch kills the shared-cache URLs at once.
+- **Repositories made private.** A reader of a public repository holds a cookie too (#354), and so does its frame a ticket. The directory writes `epoch:repo:<id>` (the current time in milliseconds) when the repository is made private, removed or left by its installation, and a public cookie or ticket issued before it is stale on its next use: the cookie is decided afresh (the source now denies), the ticket is denied. The bound is the epoch reaching the reader's colo (60–90 s on KV Classic, as above), not the cookie's five minutes; the same epoch kills the shared-cache URLs. A cookie is compared by its issue time in whole seconds, so a repository made private in the second a cookie was issued counts as later, never as earlier.
 
 ### Read order and caches
 
@@ -1819,7 +1819,7 @@ From GitHub's change to the first denied view:
 | Covered by a webhook, KV Instant | Delivery latency + under a second (p99 256 ms replication); the serving Worker's `cacheTtl` would then be the floor to lower |
 | If the epoch never arrives (KV outage) | The cookie's five minutes for pages and branch views; five minutes for frame images through a ticket already issued |
 | No webhook (enterprise policy, a lost delivery the reconciler has not redelivered) | Mirror TTL + cookie lifetime: at most ten minutes for pages (tested: `tests/repo-access-revocation.test.ts`); a ticket issued just before can add its five minutes for frame images of that commit |
-| Repository made private, readers who held it only as a public repository | Delivery latency + the reader's cookie: at most five minutes, ended at its half-life refresh by the next view (no epoch involved) |
+| Repository made private (removed, or left by its installation), readers who held it only as a public repository | Delivery latency + the visibility epoch reaching the reader's colo (60–90 s on KV Classic), for cookies and frame tickets alike. If the epoch never arrives: the cookie's five minutes, ended at its half-life refresh by the next view; a ticket's five minutes |
 
 Measured on workerd (`tests/repo-access-workerd.test.ts`, 2026-10-18, final code, local machine at load about 10, 25 revocations per run, two runs). The production Worker reads through the real control Worker over the service binding. KV is Miniflare's, with no propagation delay, so "delivery to first denied view" is only the Workers' own share. `/health` is the local stack's floor. The refresh rows include the harness's round trip from workerd to the fake GitHub in the Node test process, which dominates them.
 
