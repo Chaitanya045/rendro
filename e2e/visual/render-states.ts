@@ -237,11 +237,12 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
   const docs = visualRepo(visual);
   const base = `/r/${docs.owner}/${docs.name}`;
   const frameHeading = (name: string) => repoContent(page).getByRole("heading", { level: 1, name });
-  // The visual repository is private (its comments need that, #353): its readers are the seeded owner.
-  if (!["not-found", "denied", "unavailable", "private"].includes(state)) await signInSeeded(page.context(), origin(), visual.seedOwner, "owner");
+  // Every read needs a signed-in reader (#354). The visual repository is private (its comments need that, #353), so its readers are
+  // the seeded owner; a repository that does not exist is read as the outsider, and the states below that need another reader sign in as it.
+  await signInSeeded(page.context(), origin(), visual.seedOwner, state === "not-found" ? "outsider" : "owner");
   switch (state) {
     case "not-found": {
-      await page.goto(`/r/${repositories.closed.owner}/${repositories.closed.name}`);
+      await page.goto(`/r/${repositories.closed.owner}/no-such-repository`);
       await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
       return rendered();
     }
@@ -342,7 +343,6 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
     case "search-empty":
     case "search-error":
     case "search-limited": {
-      await signInSeeded(page.context(), origin(), visual.seedOwner, "outsider");
       await page.goto(`/r/${open.owner}/${open.name}`);
       await expect(repoContent(page).getByRole("heading", { level: 1, name: "Open home" })).toBeVisible();
       if (state === "home") return rendered();
