@@ -15,6 +15,11 @@
  *   quota), and one GitHub has not confirmed for `PUBLIC_CONFIRM_MAX_MS`
  *   grants nobody. A missed `privatized` delivery is then caught on the next
  *   read, and the visibility epoch moves exactly as that delivery would.
+ * - Public repositories without an installation (#354): a signed-in reader who asks for a name the registry does not
+ *   know has it resolved against GitHub (`GET /repos/{o}/{r}`, with their user token and, when GitHub refuses that, with
+ *   Rendro's public-read token). A public answer registers the repository as `publicOnly`: no installation, no
+ *   webhooks, confirmed like any public record. Lookups of unread repositories are bounded per reader and globally.
+ *   If the app is installed on it later, the installation's own records replace this one.
  * - Moderation roles (#259): the same mirror also records, per repository, the admin or maintain role GitHub
  *   states for the user (the `permissions` of their user-token listing, or the collaborator permission of a
  *   single-repository check), so a role is as old as read access and ends with it or sooner.
@@ -37,9 +42,10 @@ import { DeliveryDedupe } from "@/ingest/github/delivery-dedupe";
 import { GitHubError } from "@/ingest/github/source";
 import type { InstallationTokenProvider } from "@/ingest/github/token";
 import type { DurableStorageLike } from "@/ingest/orchestrator/coordinator";
-import { RepoAccessUnavailable, repoKey, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type ModerationRole, type RepoRecord } from "@/repo-read/access";
+import type { PublicReadTokens } from "@/ingest/github/public-token";
+import { RepoAccessLimited, RepoAccessUnavailable, repoKey, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type ModerationRole, type RepoRecord } from "@/repo-read/access";
 import type { EventPlan, RepoHint } from "./events";
-import type { GitHubAccessClient, ListedInstallation, ListedRepo, Page } from "./github";
+import type { ConfirmedRepo, GitHubAccessClient, ListedInstallation, ListedRepo, Page } from "./github";
 import { confirmRemoval } from "./removal";
 import { openTokens, sealTokens, type TokenRefresher, type UserTokens } from "./tokens";
 
@@ -98,6 +104,8 @@ export interface DirectoryDependencies {
   comments?: CommentAccessSink;
   /** Optional: without it, a removed repository's content stays until idle expiry deletes it (nobody can view it). */
   content?: ContentPurgeSink;
+  /** Optional (#354): Rendro's own public-read token, the fallback when GitHub refuses a reader's user token for a repository without an installation. */
+  publicRead?: PublicReadTokens;
   now(): number;
   log: DirectoryLog;
 }
@@ -140,6 +148,14 @@ export const PURGE_RETRY_MS = 15 * 60_000;
 export const PURGE_RETRY_MAX_MS = 24 * 60 * 60_000;
 /** Confirmations per alarm. */
 export const PURGE_BATCH = 20;
+/** The window of the allowances on lookups of repositories nobody has read yet (#354). */
+export const PUBLIC_RESOLVE_WINDOW_MS = 60 * 60_000;
+/** Names one reader may have resolved against GitHub per window, found or not: a probe costs a request. */
+export const PUBLIC_RESOLVE_USER_LIMIT = 30;
+/** New public repositories all readers together may register per window: each one is a registry record and a first ingest. */
+export const PUBLIC_REGISTER_GLOBAL_LIMIT = 300;
+/** A name GitHub could not show a public repository for is not asked about again for this long. */
+export const UNRESOLVED_TTL_MS = 60_000;
 /** Repositories a home lists at most, most recently pushed first. */
 export const MAX_HOME_REPOSITORIES = 500;
 
@@ -161,6 +177,19 @@ interface RepoEntry {
   etag?: string | null;
   /** The last push a listing reported (epoch ms), for the home (#338). */
   pushedAt?: number;
+  /**
+   * A public repository the app is not installed on (#354): `installation` is null, and only readers' lookups keep the
+   * record current. Cleared when an installation's own records take the repository over.
+   */
+  publicOnly?: boolean;
+  /** Set when `etag` came from Rendro's public-read token: only that credential's answers are comparable between readers. */
+  etagVia?: "service";
+}
+
+/** A fixed-window counter (#354). */
+interface Allowance {
+  startedAt: number;
+  count: number;
 }
 
 /** One repository of a reader's home (#338). */
@@ -252,7 +281,8 @@ type Need =
   | { kind: "repo"; entry: RepoEntry }
   | { kind: "visibility"; entry: RepoEntry }
   | { kind: "mirror"; user: UserEntry }
-  | { kind: "reader"; user: UserEntry; entry: RepoEntry };
+  | { kind: "reader"; user: UserEntry; entry: RepoEntry }
+  | { kind: "resolve"; owner: string; name: string };
 
 type Decision = { answer: RepoRecord | null } | { need: Need };
 
@@ -301,6 +331,8 @@ export class AccessDirectory {
   private readonly deliveries: DeliveryDedupe;
   private readonly refreshing = new Map<string, { gen: number; promise: Promise<Mirror | null> }>();
   private readonly renewing = new Map<string, Promise<string>>();
+  /** Lookups of one unknown name in flight, so readers asking together cost GitHub one request. */
+  private readonly resolving = new Map<string, Promise<void>>();
   private readonly failures = new Map<string, number>();
   private epochChain: Promise<void> = Promise.resolve();
   /** The alarm this instance set since the last one fired (null: none), so the purge ledger never postpones a sooner one. */
@@ -322,8 +354,10 @@ export class AccessDirectory {
         try {
           const repo = await this.authorize(body.viewer as string, body.owner as string, body.name as string);
           return repo ? Response.json({ repo }) : Response.json({}, { status: 404 });
-        } catch {
-          return Response.json({ error: "Unavailable" }, { status: 503 });
+        } catch (error) {
+          return error instanceof RepoAccessLimited
+            ? Response.json({ error: "Limited", retryAfter: error.retryAfterSeconds }, { status: 429 })
+            : Response.json({ error: "Unavailable" }, { status: 503 });
         }
       }
       case "/moderation":
@@ -381,6 +415,7 @@ export class AccessDirectory {
       // Webhooks kept changing the answer while GitHub was asked: unknown for now.
       throw new RepoAccessUnavailable();
     } catch (error) {
+      if (error instanceof RepoAccessLimited) throw error;
       if (!(error instanceof RepoAccessUnavailable)) this.deps.log("access.unavailable", { reason: error instanceof GitHubError ? error.kind : "error" });
       throw new RepoAccessUnavailable();
     }
@@ -433,34 +468,81 @@ export class AccessDirectory {
     return installation ? { entry, installation } : null;
   }
 
+  /** A name's record when it is a live public repository registered without an installation (#354). Storage reads only. */
+  private async lookupPublic(owner: string, name: string): Promise<RepoEntry | null> {
+    const key = repoKey(owner, name);
+    const id = await this.storage.get<number>(`name:${key}`);
+    const entry = id === undefined ? undefined : await this.storage.get<RepoEntry>(`repo:${id}`);
+    return entry?.publicOnly && !entry.removed && repoKey(entry.owner, entry.name) === key ? entry : null;
+  }
+
   private async decide(viewer: string, owner: string, name: string, unconfirmed = false): Promise<Decision> {
     const found = await this.lookup(owner, name);
+    // An installation that is not active covers nothing: its public repositories are read like any other public one (#354).
+    let covered = found;
     if (found) {
       const { entry, installation } = found;
       if (installation.check) return { need: { kind: "installation", entry: installation } };
-      if (installation.state !== "active") return { answer: null };
+      if (installation.state !== "active") covered = null;
       // A reader with no GitHub tokens is denied a repository recorded as private without asking GitHub: a check could only deny them too.
-      if (entry.private && !(await this.user(viewer))?.tokens) return { answer: null };
-      if (entry.check || entry.defaultBranch === null) return { need: { kind: "repo", entry } };
-      if (!entry.private) {
+      else if (entry.private && !(await this.user(viewer))?.tokens) return { answer: null };
+      else if (entry.check || entry.defaultBranch === null) return { need: { kind: "repo", entry } };
+      else if (!entry.private) {
         // A `privatized` delivery can be missed: public is only as current as GitHub's last word on it.
         const age = this.deps.now() - (entry.confirmedAt ?? 0);
         if (age >= PUBLIC_CONFIRM_TTL_MS && !(unconfirmed && age < PUBLIC_CONFIRM_MAX_MS)) return { need: { kind: "visibility", entry } };
         return { answer: repoRecord(entry) };
       }
     }
+    if (!covered) {
+      // Not an installed repository: perhaps a public one registered without an installation (#354).
+      const open = await this.lookupPublic(owner, name);
+      if (open) {
+        const age = this.deps.now() - (open.confirmedAt ?? 0);
+        if (open.check || (age >= PUBLIC_CONFIRM_TTL_MS && !(unconfirmed && age < PUBLIC_CONFIRM_MAX_MS))) return { need: { kind: "visibility", entry: open } };
+        return { answer: repoRecord(open) };
+      }
+    }
     const user = await this.user(viewer);
-    if (!user?.tokens) return { answer: null };
+    // Without GitHub tokens only a public repository can be had, and only through Rendro's own token.
+    if (!user?.tokens) return this.unknownName(viewer, owner, name);
     const mirror = await this.storage.get<Mirror>(`mirror:${viewer}`);
     // A stale mirror is refreshed first, even for an unknown name: the listing may teach the registry a repository no webhook announced.
     if (!mirror || mirror.gen !== user.gen || this.deps.now() - mirror.fetchedAt >= MIRROR_TTL_MS) return { need: { kind: "mirror", user } };
-    if (!found) return { answer: null };
-    const { entry } = found;
+    if (!covered) return this.unknownName(viewer, owner, name);
+    const { entry } = covered;
     if (mirrorIds(mirror).has(entry.id)) return { answer: repoRecord(entry) };
     if (!mirror.partial.includes(entry.installation as number)) return { answer: null };
     // The installation was listed only in part: GitHub answers for this one repository, kept as long as a mirror.
     const cached = await this.freshCheck(viewer, user, entry.id);
     return cached ? { answer: cached.allowed ? repoRecord(entry) : null } : { need: { kind: "reader", user, entry } };
+  }
+
+  /**
+   * A name nothing the directory knows covers (#354): it is asked of GitHub, unless GitHub was asked a moment ago, or the
+   * reader (or everyone together) has spent the allowance for repositories nobody has read yet.
+   */
+  private async unknownName(viewer: string, owner: string, name: string): Promise<Decision> {
+    const now = this.deps.now();
+    const until = await this.storage.get<number>(`unresolved:${repoKey(owner, name)}`);
+    if (until !== undefined && until > now) return { answer: null };
+    for (const [key, limit] of [[`allowance:user:${viewer}`, PUBLIC_RESOLVE_USER_LIMIT], ["allowance:global", PUBLIC_REGISTER_GLOBAL_LIMIT]] as const) {
+      const window = await this.allowance(key);
+      if (window.count >= limit) throw new RepoAccessLimited(Math.max(1, Math.ceil((window.startedAt + PUBLIC_RESOLVE_WINDOW_MS - now) / 1000)));
+    }
+    return { need: { kind: "resolve", owner, name } };
+  }
+
+  /** The counter at `key`, started afresh once its window has ended. */
+  private async allowance(key: string): Promise<Allowance> {
+    const now = this.deps.now();
+    const stored = await this.storage.get<Allowance>(key);
+    return stored && now - stored.startedAt < PUBLIC_RESOLVE_WINDOW_MS ? stored : { startedAt: now, count: 0 };
+  }
+
+  private async spend(key: string): Promise<void> {
+    const window = await this.allowance(key);
+    await this.storage.put(key, { ...window, count: window.count + 1 } satisfies Allowance);
   }
 
   /** The single-repository check GitHub answered for `userId` in the current generation, if it is no older than a mirror may be. */
@@ -476,7 +558,9 @@ export class AccessDirectory {
         return this.checkInstallation(need.entry);
       case "repo":
       case "visibility":
-        return this.checkRepo(need.entry);
+        return need.entry.publicOnly ? this.checkPublic(viewer, need.entry) : this.checkRepo(need.entry);
+      case "resolve":
+        return this.resolve(viewer, need.owner, need.name);
       case "mirror":
         await this.refreshMirror(viewer, need.user);
         return;
@@ -522,6 +606,91 @@ export class AccessDirectory {
     }
     // Found invisible without an event (a missed `privatized` delivery): its visibility epoch is written now, as that delivery's would be.
     if (await this.storage.get(`pending-repo:${entry.id}`) !== undefined) await this.flushEpochs();
+  }
+
+  /**
+   * `GET /repos/{o}/{r}` for a repository the app is not installed on (#354): with the reader's user token first and,
+   * when GitHub refuses that (or has no repository to show it), with Rendro's public-read token. A refusal of the user
+   * token alone is ambiguous (private, missing, or a token GitHub does not let read it), so only the service token's
+   * answer is `definitive`. Conditional requests are made only with the service token: another credential's ETag
+   * is not comparable.
+   */
+  private async readPublic(viewer: string, owner: string, name: string, cached: ConfirmedRepo | null): Promise<{ repo: ConfirmedRepo | null; via: "user" | "service" | null; definitive: boolean }> {
+    const user = await this.user(viewer);
+    if (user?.tokens) {
+      let token: string | null = null;
+      try {
+        token = await this.accessToken(viewer, user);
+      } catch (error) {
+        // Their tokens are gone: the service token alone answers (the mirror path forgets the user when it next lists).
+        if (!(error instanceof TokensRejected)) throw error;
+      }
+      if (token) {
+        try {
+          const repo = await this.deps.github.repository(`user:${viewer}`, token, owner, name);
+          if (repo) return { repo, via: "user", definitive: true };
+        } catch (error) {
+          // GitHub refused the token for this repository (no installation covers it): the fallback tries again.
+          if (!(error instanceof GitHubError && (error.kind === "forbidden" || error.kind === "unauthorized"))) throw error;
+        }
+      }
+    }
+    const service = this.deps.publicRead?.token() ?? null;
+    if (service === null) return { repo: null, via: null, definitive: false };
+    return { repo: await this.deps.github.repository("public-read", service, owner, name, cached), via: "service", definitive: true };
+  }
+
+  /** Register `owner/name` if GitHub shows it public and nothing the directory holds covers it. One lookup per name at a time. */
+  private resolve(viewer: string, owner: string, name: string): Promise<void> {
+    const key = repoKey(owner, name);
+    const running = this.resolving.get(key);
+    if (running) return running;
+    const promise = this.guarded(`resolve:${key}`, () => this.resolveOnce(viewer, owner, name)).finally(() => this.resolving.delete(key));
+    this.resolving.set(key, promise);
+    return promise;
+  }
+
+  private async resolveOnce(viewer: string, owner: string, name: string): Promise<void> {
+    const key = repoKey(owner, name);
+    const start = await this.storage.get<number>("seq") ?? 0;
+    await this.spend(`allowance:user:${viewer}`);
+    const { repo, via } = await this.readPublic(viewer, owner, name, null);
+    const unresolved = () => this.storage.put(`unresolved:${key}`, this.deps.now() + UNRESOLVED_TTL_MS);
+    if (!repo || repo.private) return unresolved();
+    const existing = await this.storage.get<RepoEntry>(`repo:${repo.id}`);
+    // An event changed this record while GitHub answered, or an active installation's records cover it: those win.
+    const installation = existing?.installation == null ? undefined : await this.storage.get<InstallationEntry>(`inst:${existing.installation}`);
+    if (existing && (existing.seq > start || (!existing.removed && !existing.publicOnly && installation?.state === "active"))) return unresolved();
+    if ((await this.allowance("allowance:global")).count >= PUBLIC_REGISTER_GLOBAL_LIMIT) throw new RepoAccessLimited(60);
+    await this.spend("allowance:global");
+    await this.putRepo({
+      id: repo.id, owner: repo.owner, name: repo.name, private: false, defaultBranch: repo.defaultBranch, installation: null, publicOnly: true,
+      removed: false, check: false, seq: existing?.seq ?? 0, confirmedAt: this.deps.now(), etag: repo.etag, ...via === "service" ? { etagVia: "service" } : {},
+    }, existing);
+    // A repository the app lost earlier and a reader now shows to be public: its pending purge is cancelled, as when GitHub still grants it.
+    await this.restoreRemoved(repo.id);
+    this.deps.log("access.public-registered", { repoId: repo.id });
+    // GitHub redirected the old name of a renamed repository: only its current name is a URL (as for an installed one).
+    if (repoKey(repo.owner, repo.name) !== key) await unresolved();
+  }
+
+  /** Confirm a public repository registered without an installation, like `checkRepo` does for an installed one. */
+  private async checkPublic(viewer: string, entry: RepoEntry): Promise<void> {
+    const cached = entry.etag && entry.etagVia === "service" ? { ...repoRecord(entry), etag: entry.etag } : null;
+    const { repo, via, definitive } = await this.guarded(`repo:${entry.id}`, () => this.readPublic(viewer, entry.owner, entry.name, cached));
+    const current = await this.storage.get<RepoEntry>(`repo:${entry.id}`) as RepoEntry;
+    if (current.seq !== entry.seq) return;
+    // Only the service token's "not found" is final; a reader's refused token says nothing about the repository.
+    if (!repo && !definitive) throw new GitHubError("forbidden", "No credential can confirm this repository", 403);
+    if (!repo || repo.id !== entry.id || repo.private) {
+      await this.putRepo({ ...current, removed: true, check: false, etag: null, etagVia: undefined }, current);
+      await this.flushEpochs();
+      return;
+    }
+    await this.putRepo({
+      ...current, owner: repo.owner, name: repo.name, private: false, defaultBranch: repo.defaultBranch, removed: false, check: false,
+      confirmedAt: this.deps.now(), etag: repo.etag, etagVia: via === "service" ? "service" : undefined,
+    }, current);
   }
 
   private async asInstallation<T>(installation: number, call: (token: string | null) => Promise<T>): Promise<T> {
@@ -850,7 +1019,9 @@ export class AccessDirectory {
     const base: RepoEntry = existing ?? { id: hint.id, owner: hint.owner, name: hint.name, private: true, defaultBranch: null, installation, removed: true, check: true, seq };
     // A payload is not a repository read: its fields no longer match the stored ETag.
     const entry: RepoEntry = change === "confirm"
-      ? { ...base, owner: hint.owner, name: hint.name, private: hint.private ?? base.private, installation: installation ?? base.installation, removed: false, check: true, seq, etag: null }
+      ? { ...base, owner: hint.owner, name: hint.name, private: hint.private ?? base.private, installation: installation ?? base.installation, removed: false, check: true, seq, etag: null,
+        // The app's own records take a repository over once it is installed on it (#354).
+        ...installation !== null ? { publicOnly: undefined, etagVia: undefined } : {} }
       : change === "privatize" ? { ...base, private: true, seq, etag: null } : { ...base, removed: true, seq, etag: null };
     await this.putRepo(entry, existing);
   }

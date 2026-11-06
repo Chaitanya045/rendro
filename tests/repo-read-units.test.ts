@@ -4,7 +4,7 @@ import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/
 import { plaintextSealer, r2Store, type ContentSealer, type ObjectStore } from "@/ingest/orchestrator/store";
 import type { SidebarIndex } from "@/ingest/sidebar";
 import {
-  isModerationRole, kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, repoModerationHandler, serviceRepoModeration,
+  isModerationRole, kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessLimited, RepoAccessUnavailable, repoModerationHandler, serviceRepoModeration,
   serviceRepoPermissions, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord,
 } from "@/repo-read/access";
 import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, type AuthorizeDependencies, type Viewer } from "@/repo-read/authorize";
@@ -126,6 +126,24 @@ describe("repository access protocol", () => {
     expect(await client.authorize("u", "octo", "missing")).toBeNull();
     access.unavailable = true;
     await expect(client.authorize("u", "octo", "docs")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+  });
+
+  it("carries a reader's limit (#354): the handler answers 429 with the wait, and the client rethrows it as a limit", async () => {
+    const access = new InMemoryRepoAccess().addRepo(record);
+    access.limitedFor = 90;
+    const response = await repoAccessHandler(access)(new Request("https://repo-access.internal/v1/authorize", { method: "POST", body: JSON.stringify({ viewer: "u", owner: "octo", name: "docs" }) }));
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ error: "Limited", retryAfter: 90 });
+    const limited = await serviceRepoPermissions({ fetch: repoAccessHandler(access) }).authorize("u", "octo", "docs").catch((error: unknown) => error);
+    expect(limited).toBeInstanceOf(RepoAccessLimited);
+    expect((limited as RepoAccessLimited).retryAfterSeconds).toBe(90);
+    // An answer that names no sensible wait is a minute.
+    for (const body of [{}, { retryAfter: 0 }, { retryAfter: 7_200 }, { retryAfter: "5" }, null]) {
+      const odd = serviceRepoPermissions({ fetch: () => Promise.resolve(Response.json(body, { status: 429 })) });
+      expect(((await odd.authorize("u", "octo", "docs").catch((error: unknown) => error)) as RepoAccessLimited).retryAfterSeconds).toBe(60);
+    }
+    const garbled = serviceRepoPermissions({ fetch: () => Promise.resolve(new Response("{", { status: 429 })) });
+    expect(((await garbled.authorize("u", "octo", "docs").catch((error: unknown) => error)) as RepoAccessLimited).retryAfterSeconds).toBe(60);
   });
 
   it("treats a malformed, mismatched, failed or slow answer as unavailable", async () => {
@@ -686,6 +704,11 @@ describe("authorization edge cases", () => {
     if (result.kind !== "granted") throw new Error(result.kind);
     return `${session}; ${result.cookies[0].split(";", 1)[0]}`;
   }
+
+  it("answers a reader whose lookups are limited with the source's wait and a 429, never a denial (#354)", async () => {
+    access.limitedFor = 42;
+    expect(await authorizeRepo(deps(), request(session), "octo", "docs")).toEqual({ kind: "unavailable", retryAfter: "42", status: 429 });
+  });
 
   it("never grants anything to a request without a signed-in reader, even if the source would", async () => {
     const authorize = vi.spyOn(access, "authorize").mockResolvedValue(repo);

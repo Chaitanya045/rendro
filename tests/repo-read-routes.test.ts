@@ -596,6 +596,25 @@ describe("private repositories", () => {
   });
 });
 
+describe("lookups of repositories nobody has read yet are limited (#354)", () => {
+  it("answers a navigation with the retry page as a 429 and a script with JSON, both naming the wait and never cached", async () => {
+    fixture.access.limitedFor = 120;
+    const shell = await get("/r/lib-org/never-read");
+    expect(shell.status).toBe(429);
+    expect(shell.headers.get("Retry-After")).toBe("120");
+    expect(shell.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(shell.headers.get("Content-Type")).toMatch(/^text\/html/);
+    const tree = await get("/r/lib-org/never-read/tree?dir=");
+    expect(tree.status).toBe(429);
+    expect(tree.headers.get("Retry-After")).toBe("120");
+    expect(await tree.json()).toEqual({ error: "Too many requests. Please retry later.", code: "rate_limited" });
+    // Comment access is limited the same way.
+    vi.stubEnv("SITE_URL", "https://rendro.test");
+    const access = await app.request(`https://rendro.test/r/lib-org/never-read/comment-access`, { method: "POST", headers: { cookie: `__Host-${sessionCookies.outsider}`, Origin: "https://rendro.test" } }, fixture.env, fixture.ctx);
+    expect(access.status).toBe(429);
+  });
+});
+
 describe("faults are retryable 503s, never 404s", () => {
   it.each([
     ["the permission source", () => { fixture.access.unavailable = true; }],

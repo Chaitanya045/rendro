@@ -26,8 +26,9 @@ const cookieDocument = /^\/r\/[^/]+\/[^/]+(?:\/[~@][^/]+)?\/files\//;
 export function unavailableResponse(c: Context, failure: ViewerUnavailable, representation: "html" | "json" | "asset") {
   c.header("Cache-Control", "private, no-store");
   c.header("Retry-After", failure.retryAfter);
-  if (failure.status === 429) return c.json({ error: "Too many requests. Please retry later.", code: "rate_limited" }, 429);
   const page = () => renderSessionUnavailablePage(503, "document", cookieDocument.test(c.req.path));
+  // A navigation that is limited (#354) gets the retry page, as a 429 that names its wait; scripts get JSON.
+  if (failure.status === 429) return representation === "html" ? c.html(page(), 429) : c.json({ error: "Too many requests. Please retry later.", code: "rate_limited" }, 429);
   if (representation === "asset") return assetError(c, page, 503);
   return representation === "json"
     ? c.json({ error: "Document temporarily unavailable", retryable: true }, 503)

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { GitHubError } from "../../src/ingest/github/source";
 import { staticTokenProvider, type InstallationTokenProvider } from "../../src/ingest/github/token";
+import { publicReadTokens, type PublicReadTokens } from "../../src/ingest/github/public-token";
 import { RateGovernor } from "../../src/ingest/github/rate-governor";
 import { AccessDirectory, type CommentAccessSink, type ContentPurgeSink, type DirectoryStorage, type EpochStore } from "../../src/repo-access/directory";
 import { planEvent, type EventPlan } from "../../src/repo-access/events";
@@ -85,6 +86,8 @@ export interface AccessFixtureOptions {
   comments?: CommentAccessSink;
   /** The cached R2 content of removed repositories (#263). */
   content?: ContentPurgeSink;
+  /** Rendro's public-read token (#354); `true` configures the fake GitHub's. */
+  publicRead?: PublicReadTokens | boolean;
 }
 
 /**
@@ -107,7 +110,8 @@ export function accessFixture(options: AccessFixtureOptions = {}) {
     github: client,
     installationTokens: tokens,
     refresher: options.refresher ?? httpTokenRefresher({ clientId: github.clientId, clientSecret: github.clientSecret, webOrigin: github.webOrigin, fetch: github.fetch, now: clock.now }),
-    tokenKey: TOKEN_KEY, epochs: kv, comments: options.comments, content: options.content, now: clock.now, log: (event, fields) => logs.push({ event, fields }),
+    tokenKey: TOKEN_KEY, epochs: kv, comments: options.comments, content: options.content, now: clock.now,
+    publicRead: options.publicRead === true ? publicReadTokens(github.publicReadToken) : options.publicRead || undefined, log: (event, fields) => logs.push({ event, fields }),
   });
   const installation = github.install("octo", { id: 71 });
   const open = github.repo("octo", "open-docs", { id: 801 });

@@ -175,6 +175,13 @@ export class FakeGitHub {
   readonly origin = "https://api.github.test";
   readonly archiveOrigin = "https://codeload.github.test";
   readonly token = "fake-installation-token";
+  /** Rendro's public-read-only token (#354): reads every public repository, and no private one. */
+  readonly publicReadToken = "fake-public-read-token";
+  /**
+   * Whether a GitHub App user token may read a public repository the App is not installed on (#354): GitHub's documentation
+   * contradicts itself. Off, GitHub refuses it with 403 "Resource not accessible by integration".
+   */
+  userTokensReadPublic = false;
   readonly appJwt = "fake-app-jwt";
   /** The App's ID and private key (#338): an RS256 JWT with `iss` the ID authenticates the /app/ endpoints. */
   readonly appId = "4242";
@@ -489,7 +496,8 @@ export class FakeGitHub {
       return installation ? this.json({ id: installation.id, account: { login: installation.account } }) : this.json({ message: "Not Found" }, 404);
     }
     const authorization = request.headers.get("authorization");
-    const scope = this.installationScope(authorization);
+    const reader = this.readerOf(authorization);
+    const scope = reader ? undefined : this.installationScope(authorization);
     if (scope === "invalid") return this.json({ message: "Bad credentials" }, 401);
     if (scope !== "all" && scope?.suspended) return this.json({ message: "This installation has been suspended" }, 403);
     if (url.pathname === "/installation/repositories") {
@@ -505,6 +513,14 @@ export class FakeGitHub {
     }
     const repo = match ? this.repos.get(`${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}`) : undefined;
     if (!match || !repo || (repo.isPrivate && !authorization) || (scope && scope !== "all" && this.installationOf(repo) !== scope)) return this.json({ message: "Not Found" }, 404);
+    if (reader === "public" && repo.isPrivate) return this.json({ message: "Not Found" }, 404);
+    if (reader && reader !== "public") {
+      // A GitHub App user token reads what an installation covers and the user may read; elsewhere it depends on `userTokensReadPublic`.
+      const covered = this.installationOf(repo) !== undefined && this.canRead(reader, repo);
+      if (!covered && !(this.userTokensReadPublic && !repo.isPrivate)) {
+        return this.userTokensReadPublic ? this.json({ message: "Not Found" }, 404) : this.json({ message: "Resource not accessible by integration" }, 403);
+      }
+    }
     if (this.rate.remaining <= 0) {
       return this.withRate(this.json({ message: "API rate limit exceeded for installation." }, 403));
     }
@@ -569,6 +585,13 @@ export class FakeGitHub {
       return this.billed(new Response(null, { status: 302, headers: { location: `${this.archiveOrigin}/${repo.owner}/${repo.name}/legacy.tar.gz/${sha}?token=${token}` } }));
     }
     return this.billed(this.json({ message: "Not Found" }, 404));
+  }
+
+  /** The public-read token, or the user a valid App user access token belongs to (#354); null for anything else. */
+  private readerOf(authorization: string | null): "public" | FakeUser | null {
+    if (authorization === `Bearer ${this.publicReadToken}`) return "public";
+    const grant = this.accessTokens.get((authorization ?? "").slice("Bearer ".length));
+    return grant && (grant.expiresAt === null || grant.expiresAt > this.now()) ? this.users.get(grant.user) ?? null : null;
   }
 
   /** "all" for the shared token, the installation for a scoped one, undefined without a token, "invalid" for anything else. */
