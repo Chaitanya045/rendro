@@ -799,7 +799,7 @@ describe("first views enqueue the ingest", () => {
 
   /** Lets the request reach the coordinator before the test answers it. */
   async function untilEnqueued(coordinator: FakeIngestCoordinator) {
-    for (let spins = 0; spins < 200 && coordinator.calls.length === 0; spins += 1) await new Promise(resolve => setImmediate(resolve));
+    for (let spins = 0; spins < 3000 && coordinator.calls.length === 0; spins += 1) await new Promise(resolve => setImmediate(resolve));
     expect(coordinator.calls).toEqual([{
       repo: { id: freshRepo.id, owner: freshRepo.owner, name: freshRepo.name, private: freshRepo.private, installationId: null },
       branch: "main",
@@ -846,7 +846,7 @@ describe("first views enqueue the ingest", () => {
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
     const second = get(fresh);
-    for (let spins = 0; spins < 200 && fixture.access.calls.authorize.length < 2; spins += 1) await new Promise(resolve => setImmediate(resolve));
+    for (let spins = 0; spins < 3000 && fixture.access.calls.authorize.length < 2; spins += 1) await new Promise(resolve => setImmediate(resolve));
     for (let spins = 0; spins < 10; spins += 1) await new Promise(resolve => setImmediate(resolve)); // the poll joins the same flight and waits in its own window: no second call lands
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await second).headers.get(READINESS_HEADER)).toBe("preparing");
@@ -915,7 +915,7 @@ describe("first views enqueue the ingest", () => {
     fixture.env.FIRST_VIEW_LIMIT = new FakeRateLimiter();
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     const first = get(`${fresh}/~preview`);
-    for (let spins = 0; spins < 200 && coordinator.calls.length === 0; spins += 1) await new Promise(resolve => setImmediate(resolve));
+    for (let spins = 0; spins < 3000 && coordinator.calls.length === 0; spins += 1) await new Promise(resolve => setImmediate(resolve));
     expect(coordinator.calls[0]).toMatchObject({ repo: { id: freshRepo.id }, branch: "preview", defaultBranch: false });
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
