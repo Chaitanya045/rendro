@@ -6,10 +6,11 @@ import type { RepoFixtures } from "./repo-fixtures";
 
 /**
  * Repository docs read through /r/ (#234): snapshots built by the P3b ingest pipeline from a fake GitHub (global setup),
- * authorized by the real control Worker (#243), whose permission mirror reads that fake GitHub. A public repository is
- * read anonymously; a private one by a granted reader through the capability cookie, with images through the frame's
- * asset ticket. Everyone else gets the same plain 404 as a repository that does not exist, and a membership webhook
- * revokes a reader for their very next view.
+ * authorized by the real control Worker (#243), whose permission mirror reads that fake GitHub. Every read needs a signed-in
+ * reader (#354): a public repository is read by any of them, a private one by a granted reader, both through the capability
+ * cookie, with images through the frame's asset ticket. A visitor who is not signed in is sent to sign in, and everyone
+ * else gets the same plain 404 as a repository that does not exist; a membership webhook revokes a reader for their
+ * very next view.
  */
 test.use({ viewport: desktop });
 
@@ -28,8 +29,28 @@ test.afterEach(({ cspViolations }) => {
   expect(cspViolations.filter(message => !/x-frame-options/i.test(message)), "CSP violations").toEqual([]);
 });
 
-test("an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history", async ({ page }) => {
+test("a visitor who is not signed in is sent to sign in and comes back; everything else under /r/ is the plain 404", async ({ page, request, seed, baseURL }) => {
   const { open } = repos();
+  const base = `/r/${open.owner}/${open.name}`;
+  // A navigation signs in and returns: the redirect names the page, and signing in lands on it.
+  const redirect = await request.get(`${base}?doc=docs%2Fguide%2Fstart.md`, { maxRedirects: 0 });
+  expect(redirect.status()).toBe(302);
+  expect(redirect.headers()["cache-control"]).toBe("private, no-store");
+  expect(redirect.headers().location).toBe(`/sign-in?returnTo=${encodeURIComponent(`${base}?doc=docs%2Fguide%2Fstart.md`)}`);
+  // Frames, assets, tree pages and search are the plain 404, with nothing a shared cache could keep.
+  for (const path of [`${base}/@${open.commit}/files/docs/index.md`, `${base}/@${open.commit}/files/docs/img/logo.svg`, `${base}/@${open.commit}/tree?dir=`, `${base}/search?q=answer`]) {
+    const denied = await request.get(path, { maxRedirects: 0 });
+    expect(denied.status(), path).toBe(404);
+    expect(denied.headers()["cache-control"], path).toBe("private, no-store");
+  }
+  await signInSeeded(page.context(), baseURL, seed, "outsider");
+  await page.goto(new URL(redirect.headers().location, baseURL).searchParams.get("returnTo") as string);
+  await expect(heading(page, "Start here")).toBeVisible();
+});
+
+test("a signed-in reader browses a public repository: entry page, sidebar titles, links, images and history", async ({ page, seed, baseURL }) => {
+  const { open } = repos();
+  await signInSeeded(page.context(), baseURL, seed, "outsider");
   const response = await page.goto(`/r/${open.owner}/${open.name}`);
   expect(response?.status()).toBe(200);
   expect(response?.headers()["cache-control"]).toBe("private, no-cache");
@@ -44,6 +65,8 @@ test("an anonymous reader browses a public repository: entry page, sidebar title
   // The branch view keeps its URL; the frame is pinned to the commit the branch served.
   expect(frameUrl(page)).toMatch(new RegExp(`/r/${open.owner}/${open.name}/@${open.commit}/files/docs/index\\.md$`));
   await expectLogoRendered(page);
+  // The opaque frame sends no cookies: even a public repository's image loads through the ticket in its own URL (#354).
+  expect(await logo(page).evaluate(image => (image as HTMLImageElement).currentSrc)).toMatch(/\/view\/v1\.[\w-]+\.[\w-]+\/files\/docs\/img\/logo\.svg$/);
   await expect(content(page).locator(".markdown-alert-tip")).toContainText("Rendered once, at ingest.");
 
   // A link inside the rendered page opens through the shell, as a new history entry.
@@ -61,8 +84,8 @@ test("an anonymous reader browses a public repository: entry page, sidebar title
   await expect(page).toHaveURL(/\?doc=docs%2Fguide%2Fadvanced\.md$/);
   // An in-shell switch is measured so the switch budget stays observable (#245).
   expect(await page.evaluate(() => performance.getEntriesByName("rendro:frame-switch").length)).toBeGreaterThan(0);
-  // Public reads never set a capability cookie.
-  expect((await page.context().cookies()).filter(cookie => cookie.name.includes("rendro-repo"))).toEqual([]);
+  // A public repository's reader holds a capability cookie, as a private one's does; its frame loads images by ticket (#354).
+  expect((await page.context().cookies()).find(cookie => /^(?:__Host-)?rendro-repo\.9001$/.test(cookie.name))).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
 });
 
 test("a granted reader browses a private repository with a capability cookie and ticketed images; others get a plain 404", async ({ page, secondContext, seed, baseURL }) => {
@@ -88,10 +111,15 @@ test("a granted reader browses a private repository with a capability cookie and
   await signInSeeded(secondContext, baseURL, seed, "outsider");
   for (const reader of ["outsider", "anonymous"]) {
     if (reader === "anonymous") await secondContext.clearCookies();
-    const denied = await other.goto(url);
-    expect(denied?.status(), reader).toBe(404);
-    expect(denied?.headers()["cache-control"], reader).toBe("private, no-store");
-    await expect(other.getByRole("heading", { name: "Page not found" })).toBeVisible();
+    // Signed in without access, the shell is the plain 404; signed out, a navigation is sent to sign in (#354).
+    if (reader === "anonymous") {
+      expect((await other.request.get(url, { maxRedirects: 0 })).status(), reader).toBe(302);
+    } else {
+      const denied = await other.goto(url);
+      expect(denied?.status(), reader).toBe(404);
+      expect(denied?.headers()["cache-control"], reader).toBe("private, no-store");
+      await expect(other.getByRole("heading", { name: "Page not found" })).toBeVisible();
+    }
     const frame = await other.goto(`${url}/@${closed.commit}/files/docs/index.md`);
     expect(frame?.status(), reader).toBe(404);
     // The search endpoint sits behind the same authorization (#251): a denial is the plain 404.
@@ -102,6 +130,7 @@ test("a granted reader browses a private repository with a capability cookie and
 
 test("the shell's search finds a section and navigates in-shell; a signed-in reader searches a private repository", async ({ page, seed, baseURL }) => {
   const { open, closed } = repos();
+  await signInSeeded(page.context(), baseURL, seed, "outsider");
   await page.goto(`/r/${open.owner}/${open.name}`);
   await expect(heading(page, "Open home")).toBeVisible();
   const input = page.locator("#repo-search-input");

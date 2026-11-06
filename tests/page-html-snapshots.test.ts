@@ -64,7 +64,7 @@ describe("server-rendered page snapshots", () => {
       (await page(app.request(`https://rendro.test${path}`, { headers }, fixture.env, fixture.ctx))).replace(/ nonce="[^"]+"/g, ` nonce="${NONCE}"`);
 
     it("public and private", async () => {
-      await snapshot("shell-route-public", await served("/r/Octo/public-docs"));
+      await snapshot("shell-route-public", await served("/r/Octo/public-docs", { Cookie: sessionCookies.reader }));
       await snapshot("shell-route-private", await served("/r/octo/secret-docs", { Cookie: sessionCookies.reader }));
     });
   });

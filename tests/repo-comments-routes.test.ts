@@ -64,8 +64,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** Every read needs a signed-in reader (#354): without a cookie of its own a request is the outsider's. */
 function request(path: string, init: { method?: string; headers?: Record<string, string> } = {}) {
-  return app.request(`${ORIGIN}${path}`, { method: init.method ?? "GET", headers: init.headers ?? {} }, fixture.env, fixture.ctx);
+  return app.request(`${ORIGIN}${path}`, { method: init.method ?? "GET", headers: { cookie: sessions.outsider, ...init.headers } }, fixture.env, fixture.ctx);
 }
 
 function access(base: string, headers: Record<string, string> = {}, query = "") {

@@ -1582,7 +1582,7 @@
           "tests": [
             {
               "file": "e2e/repo-docs.spec.ts",
-              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "name": "a signed-in reader browses a public repository: entry page, sidebar titles, links, images and history",
               "kind": "e2e"
             }
           ]
@@ -3931,7 +3931,7 @@
             },
             {
               "file": "e2e/repo-comment-permissions.spec.ts",
-              "name": "an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete",
+              "name": "an outsider is refused a private repository's comments, a visitor who is not signed in is sent to sign in, and a reader who is not the author may triage but not archive or delete",
               "kind": "e2e"
             }
           ]
@@ -4879,7 +4879,7 @@
             },
             {
               "file": "e2e/repo-comment-permissions.spec.ts",
-              "name": "an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete",
+              "name": "an outsider is refused a private repository's comments, a visitor who is not signed in is sent to sign in, and a reader who is not the author may triage but not archive or delete",
               "kind": "e2e"
             }
           ]
@@ -4972,7 +4972,7 @@
             },
             {
               "file": "e2e/repo-comment-permissions.spec.ts",
-              "name": "an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete",
+              "name": "an outsider is refused a private repository's comments, a visitor who is not signed in is sent to sign in, and a reader who is not the author may triage but not archive or delete",
               "kind": "e2e"
             }
           ]
@@ -10584,17 +10584,17 @@
           "tests": [
             {
               "file": "tests/repo-read-routes.test.ts",
-              "name": "serves the shell for the default branch without a cookie, pinned to the served commit",
+              "name": "serves the shell for the default branch to a signed-in reader, pinned to the served commit",
               "kind": "unit"
             },
             {
               "file": "tests/repo-read-routes.test.ts",
-              "name": "serves a commit-pinned document frame as immutable public HTML with links relative to the page",
+              "name": "serves a commit-pinned document frame for a public repository as private HTML with ticketed images, links relative to the page and no validator",
               "kind": "unit"
             },
             {
               "file": "e2e/repo-docs.spec.ts",
-              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "name": "a signed-in reader browses a public repository: entry page, sidebar titles, links, images and history",
               "kind": "e2e"
             }
           ]
@@ -10611,7 +10611,7 @@
           "tests": [
             {
               "file": "e2e/repo-docs.spec.ts",
-              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "name": "a signed-in reader browses a public repository: entry page, sidebar titles, links, images and history",
               "kind": "e2e"
             }
           ]
@@ -10633,7 +10633,7 @@
             },
             {
               "file": "e2e/repo-docs.spec.ts",
-              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "name": "a signed-in reader browses a public repository: entry page, sidebar titles, links, images and history",
               "kind": "e2e"
             }
           ]
@@ -10682,7 +10682,7 @@
           "tests": [
             {
               "file": "tests/repo-read-routes.test.ts",
-              "name": "answers anonymous readers with a plain 404 and remembers the denial briefly",
+              "name": "sends anonymous readers to sign in or answers the plain 404, and asks nobody",
               "kind": "unit"
             },
             {
@@ -10883,7 +10883,7 @@
           "tests": [
             {
               "file": "tests/repo-read-browser.test.ts",
-              "name": "render proxied and repository images in a public frame and block an external one",
+              "name": "render proxied images and ticketed repository images in a public frame and block an external one (#354)",
               "kind": "browser"
             },
             {
@@ -10905,7 +10905,7 @@
           "tests": [
             {
               "file": "tests/repo-access-revocation.test.ts",
-              "name": "denies anonymous readers of a repository made private once the serving isolate's public memory expires",
+              "name": "ends a signed-in stranger's read of a repository made private within its cookie's lifetime, sooner once the background refresh has run (#354)",
               "kind": "unit"
             },
             {

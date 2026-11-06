@@ -11,6 +11,8 @@ import { FakeGitHub, type FakeRepo, type FakeUser } from "./fake-github";
 import { FakeDurableStorage } from "./fake-storage";
 import { FakeClock } from "./ingest-fixture";
 
+/** A signed-in Rendro user who never linked GitHub. */
+export const STRANGER = "user-stranger";
 export const TOKEN_KEY = "test-github-token-key-0123456789abcdef";
 
 /** Durable Object storage with the alarm API the directory uses. */
@@ -141,7 +143,8 @@ export function accessFixture(options: AccessFixtureOptions = {}) {
     github.resetLog();
   }
 
-  const read = (person: keyof typeof people | null, repo: FakeRepo) => directory.authorize(person === null ? null : userIds[person], repo.owner, repo.name);
+  /** `null` reads as a signed-in stranger: a Rendro user with no GitHub link. Every read needs a signed-in reader (#354). */
+  const read = (person: keyof typeof people | null, repo: FakeRepo) => directory.authorize(person === null ? STRANGER : userIds[person], repo.owner, repo.name);
   const repoPayload = (repo: FakeRepo) => ({ repository: github.repoJson(repo) });
   const userPayload = (user: FakeUser) => ({ id: user.id, login: user.login });
 

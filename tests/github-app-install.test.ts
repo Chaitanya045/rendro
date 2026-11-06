@@ -74,7 +74,7 @@ describe("installation tokens in the control Worker (#338)", () => {
     github.install("octo", { id: 71 });
     const repo = github.repo("octo", "docs", { id: 801 });
     expect(await deliver("installation", { action: "created", installation: { id: 71, account: { login: "octo" } }, repositories: [github.repoJson(repo)] })).toBe(202);
-    expect(await source.authorize(null, "octo", "docs")).toMatchObject({ id: 801 });
+    expect(await source.authorize("stranger", "octo", "docs")).toMatchObject({ id: 801 });
     expect(github.count("app-token")).toBe(0);
     expect(github.requests.some(request => request.authorization === `Bearer ${github.token}`)).toBe(true);
   });

@@ -7,7 +7,7 @@ Rendro turns the Markdown in a GitHub repository into navigable documentation, w
 ## How it works
 
 1. **Ingest.** A push to a repository the App is installed on reaches the ingest Worker. It fetches the commit, renders the Markdown with comrak (cmark-gfm lineage), sanitizes the HTML, highlights code, and writes an immutable snapshot to R2 with a full-text index in D1. Private repositories are sealed per repository at rest.
-2. **Read.** `/r/{owner}/{repo}` serves the snapshot: a sidebar tree, search, and each page in a sandboxed frame. A signed capability cookie answers "may this reader see this repository" without calling GitHub or the database; a miss asks the control Worker, which mirrors GitHub's permissions.
+2. **Read.** `/r/{owner}/{repo}` serves the snapshot to a signed-in reader, public repositories included: a sidebar tree, search, and each page in a sandboxed frame. A signed capability cookie answers "may this reader see this repository" without calling GitHub or the database; a miss asks the control Worker, which mirrors GitHub's permissions.
 3. **Revoke.** Removing a collaborator or an installation reaches the control Worker by webhook. It bumps the reader's revocation epoch, so every outstanding cookie and asset ticket stops working.
 4. **Comment.** Select text and leave a threaded comment. Comments live in Convex, re-attach to their quote in later commits, and are readable and writable by exactly the people who can read the page. Public repositories get the docs only: **inline comments are for private repositories**.
 
@@ -18,7 +18,7 @@ Rendro turns the Markdown in a GitHub repository into navigable documentation, w
 | `/` | Landing page; a signed-in reader is redirected to `/home` |
 | `/sign-in`, `/sign-up`, `/forgot-password`, `/account/security` | Email accounts |
 | `/home` | The signed-in home: the account and how to open a repository |
-| `/r/{owner}/{repo}` | The default branch's documentation; `/~{branch}` and `/@{commit}` select a branch or commit, `?doc=<path>` a page |
+| `/r/{owner}/{repo}` | The default branch's documentation, for signed-in readers only (a visitor who is not signed in is sent to `/sign-in` and back); `/~{branch}` and `/@{commit}` select a branch or commit, `?doc=<path>` a page |
 
 ## Features
 

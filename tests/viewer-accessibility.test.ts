@@ -6,13 +6,13 @@ import { privateRepo, publicRepo, repoReadFixture, sessionCookies, stubSessions 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it.each([
-  ["public", `/r/${publicRepo.owner}/${publicRepo.name}`, false],
-  ["private", `/r/${privateRepo.owner}/${privateRepo.name}`, true],
-] as const)("renders one main around the %s repository document and preserves script/style nonces", async (_name, path, signedIn) => {
+  ["public", `/r/${publicRepo.owner}/${publicRepo.name}`],
+  ["private", `/r/${privateRepo.owner}/${privateRepo.name}`],
+] as const)("renders one main around the %s repository document and preserves script/style nonces", async (_name, path) => {
   const fixture = await repoReadFixture();
   stubSessions();
   const response = await worker.fetch(new Request(`https://rendro.test${path}`, {
-    headers: signedIn ? { cookie: sessionCookies.reader } : {},
+    headers: { cookie: sessionCookies.reader },
   }), fixture.env, fixture.ctx);
   expect(response.status).toBe(200);
   const nonce = response.headers.get("Content-Security-Policy")?.match(/'nonce-([^']+)'/)?.[1];

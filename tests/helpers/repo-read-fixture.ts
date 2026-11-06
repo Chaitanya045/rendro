@@ -21,7 +21,7 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationS
   readonly epochs = new Map<string, number>();
   /** The moderation role (#259) a user holds on a repository, by `<repo id>:<user id>`. */
   readonly moderators = new Map<string, ModerationRole>();
-  readonly calls = { authorize: [] as Array<{ viewer: string | null; repo: string }>, moderation: [] as Array<{ viewer: string; repo: string }>, epochs: 0 };
+  readonly calls = { authorize: [] as Array<{ viewer: string; repo: string }>, moderation: [] as Array<{ viewer: string; repo: string }>, epochs: 0 };
   unavailable = false;
   /** Only the role lookup fails (#259); reading is untouched. */
   moderationUnavailable = false;
@@ -54,12 +54,12 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationS
     this.epochs.set(userId, Math.max(at, (this.epochs.get(userId) ?? 0) + 1));
   }
 
-  authorize(viewer: string | null, owner: string, name: string): Promise<RepoRecord | null> {
+  authorize(viewer: string, owner: string, name: string): Promise<RepoRecord | null> {
     this.calls.authorize.push({ viewer, repo: repoKey(owner, name) });
     if (this.unavailable) return Promise.reject(new RepoAccessUnavailable());
     const repo = this.repos.get(repoKey(owner, name));
     if (!repo) return Promise.resolve(null);
-    return Promise.resolve(!repo.private || (viewer !== null && this.readers.get(repo.id)?.has(viewer)) ? repo : null);
+    return Promise.resolve(!repo.private || this.readers.get(repo.id)?.has(viewer) ? repo : null);
   }
 
   currentEpoch(userId: string): Promise<number> {

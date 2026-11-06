@@ -44,7 +44,7 @@ async function forgedWrites(token: string | undefined, scope: { repoId: number; 
   ];
 }
 
-test("an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete", async ({ page, secondContext, seeded, seed, baseURL }) => {
+test("an outsider is refused a private repository's comments, a visitor who is not signed in is sent to sign in, and a reader who is not the author may triage but not archive or delete", async ({ page, secondContext, seeded, seed, baseURL }) => {
   test.setTimeout(240_000);
   const { comments, commentsPrivate } = repos();
   // Idempotent start: the owner is a collaborator (a retry of another spec may have removed them).
@@ -72,9 +72,11 @@ test("an outsider is refused a private repository's comments, and a reader who i
   for (const [label, result] of await forgedWrites(outsiderToken, privateScope, privateThread._id, privateAnchor)) {
     expect(result, label).toMatchObject({ ok: false, code: "not_found" });
   }
-  // An anonymous visitor is refused the same way.
+  // A visitor who is not signed in is sent to sign in (#354), and Convex refuses them the same way.
   const anonymous = await secondContext.newPage();
-  expect((await anonymous.goto(`${url}?doc=docs%2Fprivate.md`))?.status()).toBe(404);
+  const redirect = await anonymous.request.get(`${url}?doc=docs%2Fprivate.md`, { maxRedirects: 0 });
+  expect(redirect.status()).toBe(302);
+  expect(redirect.headers().location).toBe(`/sign-in?returnTo=${encodeURIComponent(`${url}?doc=docs%2Fprivate.md`)}`);
   expect(await threadsAs(undefined, privateScope)).toEqual([]);
   for (const [label, result] of await forgedWrites(undefined, privateScope, privateThread._id, privateAnchor)) {
     expect(result, label).toMatchObject({ ok: false, code: "not_found" });

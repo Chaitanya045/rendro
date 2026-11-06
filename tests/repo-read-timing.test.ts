@@ -32,8 +32,9 @@ afterEach(() => {
 const pub = `/r/${publicRepo.owner}/${publicRepo.name}`;
 const priv = `/r/${privateRepo.owner}/${privateRepo.name}`;
 
+/** Every read needs a signed-in reader (#354): by default the stranger, who may read public repositories only. */
 function get(path: string, headers: Record<string, string> = {}, env: object = fixture.env) {
-  return app.request(`https://rendro.test${path}`, { headers }, env, fixture.ctx);
+  return app.request(`https://rendro.test${path}`, { headers: { cookie: sessionCookies.outsider, ...headers } }, env, fixture.ctx);
 }
 
 /** The header's metrics by name: `{ auth: { dur: "1.0" }, cache: { desc: "r2" }, … }`. */

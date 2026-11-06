@@ -9,12 +9,12 @@ declare const issued: unique symbol;
  */
 export interface RepoGrant {
   readonly repo: RepoRecord;
-  /** The reader, or null for an anonymous reader of a public repository. */
+  /** The signed-in reader: the read path grants no one else (#354). Typed `| null` only for the comment code (#353 removes its public branch). */
   readonly viewer: string | null;
-  /** The reader's revocation epoch the grant rests on (0 for public reads). */
+  /** The reader's revocation epoch the grant rests on. */
   readonly epoch: number;
   /** Until when (ms) the authorization behind this grant holds without being decided again: the
-   * capability's expiry, or the isolate's public-repository memory. Comment access (#254) never outlives it. */
+   * capability's expiry. Comment access (#254) never outlives it. */
   readonly until: number;
   readonly [issued]: true;
 }

@@ -25,7 +25,7 @@ export interface CapabilityClaims {
   r: number;
   /** Lower-cased `owner/name` the grant was made for; a rename is a cookie miss. */
   n: string;
-  /** Repository visibility when granted. */
+  /** Whether the repository was private when granted: it decides how content opens and which responses carry tickets. */
   p: boolean;
   /** Default branch when granted. */
   b: string;

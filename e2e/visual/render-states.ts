@@ -342,6 +342,7 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
     case "search-empty":
     case "search-error":
     case "search-limited": {
+      await signInSeeded(page.context(), origin(), visual.seedOwner, "outsider");
       await page.goto(`/r/${open.owner}/${open.name}`);
       await expect(repoContent(page).getByRole("heading", { level: 1, name: "Open home" })).toBeVisible();
       if (state === "home") return rendered();

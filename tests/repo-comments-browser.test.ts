@@ -93,8 +93,8 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  fixture = await repoReadFixture();
   stubSessions();
+  fixture = await repoReadFixture();
   await addGuide(fixture.commits.private);
 });
 

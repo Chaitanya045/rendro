@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import type { Frame, FrameLocator, Page } from "@playwright/test";
 import { test as base, expect } from "./fixtures";
+import { signInSeeded } from "./shell-helpers";
 import type { RepoFixtures } from "./repo-fixtures";
 
 /**
  * The public `viewer-docs` repository (e2e/repo-fixtures.ts, `viewerDocs`) read through /r/: long Markdown pages with
- * sections, links between them, a nested folder and one external link. Every viewer chrome and link spec reads it; a
- * public repository needs no session, so `page` is the reader.
+ * sections, links between them, a nested folder and one external link. Every viewer chrome and link spec reads it as the
+ * seeded outsider, who may read public repositories only: every read needs a signed-in reader (#354).
  */
 export type ViewerSite = { owner: string; name: string; commit: string; /** `/r/<owner>/<name>`. */ docs: string };
 
@@ -14,6 +15,10 @@ export type ViewerSite = { owner: string; name: string; commit: string; /** `/r/
 export const doc = (path: string) => `docs/${path}`;
 
 export const test = base.extend<{ site: ViewerSite; privateSite: ViewerSite }>({
+  context: async ({ context, baseURL, seed }, use) => {
+    await signInSeeded(context, baseURL, seed, "outsider");
+    await use(context);
+  },
   // eslint-disable-next-line no-empty-pattern -- fixtures.ts uses the same Playwright idiom for zero dependencies
   site: async ({}, use) => {
     const { viewer } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
