@@ -7,6 +7,14 @@ import type { SearchD1, SearchD1Result, SearchD1Statement } from "../../src/sear
  * Covers the same semantics the workerd tests exercise against local D1, so
  * unit tests never need a cloud database.
  */
+function rejecting<T>(work: () => T): Promise<T> {
+  try {
+    return Promise.resolve(work());
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
 class SqliteStatement implements SearchD1Statement {
   private values: SupportedValueType[] = [];
   constructor(private readonly database: DatabaseSync, private readonly sql: string) {}
@@ -14,11 +22,12 @@ class SqliteStatement implements SearchD1Statement {
     this.values = values as SupportedValueType[];
     return this;
   }
+  // D1 reports a failed statement as a rejected promise, never a synchronous throw.
   all<T = unknown>(): Promise<SearchD1Result<T>> {
-    return Promise.resolve({ results: this.database.prepare(this.sql).all(...this.values) as T[] });
+    return rejecting(() => ({ results: this.database.prepare(this.sql).all(...this.values) as T[] }));
   }
   run(): Promise<unknown> {
-    return Promise.resolve(this.database.prepare(this.sql).run(...this.values));
+    return rejecting(() => this.database.prepare(this.sql).run(...this.values));
   }
 }
 

@@ -6,7 +6,10 @@ import type { PageSection } from "@/ingest/sections";
  * same blob more than once, and only the query side reads on the hot path.
  */
 export interface SearchIndex {
-  /** Create the tables, triggers and FTS index if they do not exist. Idempotent. */
+  /**
+   * Create the tables, triggers and FTS index if they do not exist. Idempotent. Writes call it first; `query`
+   * does not (#358): it migrates and retries once only when the schema turns out to be missing.
+   */
   migrate(): Promise<void>;
   /** Whether any section of this blob is already indexed. */
   hasBlob(repoId: number, blobSha: string): Promise<boolean>;
