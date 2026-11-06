@@ -145,7 +145,7 @@ describe("self-hosted stylesheet responses", () => {
 describe("viewer shell without the Tailwind runtime", () => {
   const html = repoShell();
   const shellCss = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join("\n")
-    + readFileSync(join(repo, styleSources["viewer-base"]), "utf8");
+    + readFileSync(join(repo, styleSources.shell), "utf8") + readFileSync(join(repo, styleSources["viewer-base"]), "utf8");
 
   it("links the hashed base stylesheet as the last head element and loads no third-party script", () => {
     expect(renderStylesheet("viewer-base")).toBe(`<link rel="stylesheet" href="/styles/${file}"/>`);

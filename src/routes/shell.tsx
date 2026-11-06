@@ -1,7 +1,8 @@
 import { requestNonce } from "@/middleware/html-nonce";
-import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION, PRIVATE_VIEWER_VERSION, RUM_VERSION } from "@/viewer/asset-versions";
+import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION, PRIVATE_VIEWER_VERSION, RUM_VERSION, SHELL_VERSION } from "@/viewer/asset-versions";
+import { shareLabel } from "@/shell/shell-script";
 import { viewerUpdateNoticeStyles } from "@/viewer/markup";
-import { shareLabel, shellScript, shellStyles, type ScopedDocumentShellOptions } from "./app";
+import type { ScopedDocumentShellOptions } from "./app";
 import { CommentRecovery, FaviconLinks, FontHead, Stylesheet, ThemeAssets, ThemeButton } from "./head";
 import { InlineScript, InlineStyle, renderHtml, scriptJson } from "./trusted-html";
 
@@ -67,9 +68,12 @@ export function ShellDocument(options: ScopedDocumentShellOptions) {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{options.title} — Rendro</title>
+        {/* The first sidebar page, requested while the head is parsed: lazy-tree.js asks for exactly this URL with the same
+            credentials mode (same-origin cookies), so the browser hands it the preloaded response (#359). */}
+        <link rel="preload" as="fetch" href={`${options.frameBase}/tree?dir=`} crossorigin="" />
         <FontHead icons weights={[400, 600, 700]} />
         <ThemeAssets />
-        <InlineStyle code={shellStyles} />
+        <Stylesheet name="shell" />
         <Stylesheet name="viewer-base" />
       </head>
       <body>
@@ -121,11 +125,11 @@ export function ShellDocument(options: ScopedDocumentShellOptions) {
           <iframe name="content-frame" id="content-frame" class="content-frame" src="about:blank" title="Document content" style="display:none" sandbox="allow-scripts allow-forms allow-popups allow-downloads"></iframe>
         </main>
 
-        <InlineScript code={shellScript} />
+        <script nonce={nonce} src={`/shell.js?v=${SHELL_VERSION}`}></script>
         <InlineScript code={bootstrap} />
         <CommentRecovery userId={null} />
-        {options.repoCommentConfig.convexUrl && <script nonce={nonce} src={`/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}`}></script>}
         <script nonce={nonce} src={`/lazy-tree.js?v=${LAZY_TREE_VERSION}`}></script>
+        {options.repoCommentConfig.convexUrl && <script nonce={nonce} src={`/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}`}></script>}
         {options.privateViewerBase !== undefined && <ParentViewer base={options.privateViewerBase} />}
         {/* Real-user monitoring (#282): async, so it never holds up parsing or the first document. */}
         {options.monitoring && <script nonce={nonce} async src={`/rum.js?v=${RUM_VERSION}`}></script>}

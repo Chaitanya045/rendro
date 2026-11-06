@@ -9,6 +9,7 @@ import { COMMENTOR_PARENT_READY, COMMENTOR_PROTOCOL_VERSION } from "@/commentor/
 import { COMMENTOR_PARENT_VERSION, COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import { mockSecurityBackend, testUser } from "./fixtures/security-headers";
 import { privateRepo, publicRepo, repoReadFixture } from "./helpers/repo-read-fixture";
+import { shellAsset } from "./helpers/repo-shell";
 import { browserStep, bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
 const harness = createBrowserHarness();
@@ -54,6 +55,7 @@ beforeAll(async () => {
       host.start();
     });`, resolveDir: process.cwd(), loader: "ts" }, bundle: true, write: false, platform: "browser" }));
   assets.set("/commentor-parent.js", parent.outputFiles[0].text);
+  assets.set(shellAsset[0], shellAsset[1]);
   const requestListener = getRequestListener(request => worker.fetch(request, {
     ...fixture.env,
     ASSETS: { fetch: async (assetRequest: Request) => {

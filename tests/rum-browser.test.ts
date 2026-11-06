@@ -6,6 +6,7 @@ import { isRumEvent, RUM_MAX_EVENTS, type RumEvent } from "@/rum/schema";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 import { publicRepo, repoReadFixture } from "./helpers/repo-read-fixture";
 import { SqliteSearchD1 } from "./helpers/search-sqlite";
+import { shellAsset } from "./helpers/repo-shell";
 import { d1SearchIndex } from "@/search/d1";
 
 /*
@@ -40,6 +41,7 @@ beforeAll(async () => {
     ["/lazy-tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")],
     ["/rum.js", await bundleBrowserAsset("src/rum/client.ts")],
     ["/private-viewer.js", await bundleBrowserAsset("src/viewer/entry.ts")],
+    shellAsset,
   ]);
   await harness.start((request, response) => {
     const url = new URL(request.url ?? "/", harness.origin);

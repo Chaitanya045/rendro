@@ -73,7 +73,7 @@ pnpm dev
 
 The app starts at `http://localhost:3000`. Sign up with an email address, follow the verification link from Resend, and sign in: you land on `/home`.
 
-- `pnpm build:assets` generates the git-ignored bundles under `public/` (`lazy-tree.js`, `private-viewer.js`, `commentor-parent.js`, `commentor.js`, `rum.js`) that the repository shell and its frames load.
+- `pnpm build:assets` generates the git-ignored bundles under `public/` (`lazy-tree.js`, `private-viewer.js`, `commentor-parent.js`, `commentor.js`, `rum.js`, `shell.js`) that the repository shell and its frames load.
 - The local Node server has none of the read path's bindings, so `/r/…` is a 404 under `pnpm dev`. The E2E harness (`pnpm e2e`) runs the real Workers with simulated R2, KV, D1 and Durable Objects and a fake GitHub, which is the way to exercise `/r/` locally ([BROWSER_TESTS.md](BROWSER_TESTS.md)).
 
 ## Deployment
@@ -173,7 +173,7 @@ It checks every bucket in the three Worker configurations. `.github/workflows/r2
 ## Builds
 
 ```bash
-pnpm build:assets   # public/lazy-tree.js, private-viewer.js, commentor-parent.js, commentor.js, rum.js
+pnpm build:assets   # public/lazy-tree.js, private-viewer.js, commentor-parent.js, commentor.js, rum.js, shell.js
 pnpm build:fonts    # public/fonts/*.woff2 and src/routes/font-manifest.ts
 pnpm build:styles   # public/styles/*.css and src/routes/style-manifest.ts
 pnpm build:wasm     # the committed comrak (Markdown) WebAssembly, rebuilt from source

@@ -25,10 +25,10 @@ Rendro has two visual layers with different ownership:
 ### Runtime stack
 
 - Server-rendered HTML from Hono routes on Cloudflare Workers.
-- No surface loads a CSS runtime or CDN stylesheet. The repository shell (`src/routes/app.ts`) uses its own inline CSS plus a small self-hosted, hashed base reset (`src/styles/viewer-base.css`); its document frames use the hashed `src/styles/repo-doc.css`; the auth, account, home, landing, and 404 surfaces use inline CSS only.
-- Critical app chrome CSS lives inline in the route templates so first paint has no extra stylesheet dependency.
+- No surface loads a CSS runtime or CDN stylesheet. The repository shell uses its own self-hosted, hashed stylesheet (`src/styles/shell.css`, #359) plus a small hashed base reset (`src/styles/viewer-base.css`); its document frames use the hashed `src/styles/repo-doc.css`; the auth, account, home, landing, and 404 surfaces use inline CSS only.
+- Critical app chrome CSS for the small auth, account, home, landing and 404 pages lives inline in their route templates. The repository shell is the exception: its ~35 KB of CSS is a content-hashed, immutable stylesheet (render-blocking, in the head beside `viewer-base`) because its HTML is revalidated on every navigation; only the theme bootstrap and font faces stay inline there.
 - Tree behavior ships as `public/lazy-tree.js`, built from `src/lazy-tree/lazy-tree.ts`.
-- Comment widget ships as `public/commentor.js` (built from `src/commentor/commentor.ts`); the shell-side comment host ships as `public/commentor-parent.js` (built from `src/commentor/parent-entry.ts`). The frame client ships as `public/private-viewer.js` and real-user monitoring as `public/rum.js`. All are gitignored build outputs, versioned in the asset ledger; `pnpm build:assets` regenerates every bundle and `pnpm verify:assets` fails if one changed without a version bump.
+- Comment widget ships as `public/commentor.js` (built from `src/commentor/commentor.ts`); the shell-side comment host ships as `public/commentor-parent.js` (built from `src/commentor/parent-entry.ts`). The shell's own behaviour ships as `public/shell.js` (built from `src/shell/shell-script.ts`), the frame client as `public/private-viewer.js` and real-user monitoring as `public/rum.js`. All are gitignored build outputs, versioned in the asset ledger; `pnpm build:assets` regenerates every bundle and `pnpm verify:assets` fails if one changed without a version bump.
 - Icons: Material Symbols Outlined, self-hosted as a static subset containing only the icons the source uses (see "Fonts" below).
 - Font: Inter for app chrome and rendered documents, self-hosted.
 

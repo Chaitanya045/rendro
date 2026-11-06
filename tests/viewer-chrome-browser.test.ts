@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { securityHeaders } from "@/middleware/security-headers";
-import { repoShell } from "./helpers/repo-shell";
+import { repoShell, shellAsset } from "./helpers/repo-shell";
 import { bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 import { serveFonts } from "./helpers/fonts";
 import { serveStyles } from "./helpers/styles";
@@ -30,7 +30,7 @@ const pages: Record<string, Entry[][]> = {
 };
 
 beforeAll(async () => {
-  const assets = new Map([["/lazy-tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")]]);
+  const assets = new Map([["/lazy-tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")], shellAsset]);
   const app = new Hono();
   app.use("*", securityHeaders);
   app.get("/fonts/*", serveFonts);

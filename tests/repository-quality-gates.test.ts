@@ -10,7 +10,7 @@ import { subprocessEnv } from "./helpers/subprocess-coverage";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts as Record<string, string>;
-const assets = ["lazy-tree.js", "private-viewer.js", "commentor-parent.js", "commentor.js", "rum.js"];
+const assets = ["lazy-tree.js", "private-viewer.js", "commentor-parent.js", "commentor.js", "rum.js", "shell.js"];
 const fixtures: string[] = [];
 
 function assetFixture(): string {

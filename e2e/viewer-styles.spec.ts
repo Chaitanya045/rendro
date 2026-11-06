@@ -43,8 +43,8 @@ for (const shell of ["private", "public"] as const) {
     expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
     expect(headers["cross-origin-resource-policy"]).toBe("same-origin");
 
-    // The shell's base stylesheet, and the rendered document's own in its frame: both hashed, immutable and same-origin.
-    expect(stylesheets.map(sheet => new URL(sheet.url).pathname.replace(/\.[0-9a-f]{10}\.css$/, ".css")).sort()).toEqual(["/styles/repo-doc.css", "/styles/viewer-base.css"]);
+    // The shell's own and base stylesheets, and the rendered document's own in its frame: both hashed, immutable and same-origin.
+    expect(stylesheets.map(sheet => new URL(sheet.url).pathname.replace(/\.[0-9a-f]{10}\.css$/, ".css")).sort()).toEqual(["/styles/repo-doc.css", "/styles/shell.css", "/styles/viewer-base.css"]);
     for (const sheet of stylesheets) expect(sheet).toMatchObject({ status: 200, type: "text/css; charset=utf-8", cache: "public, max-age=31536000, immutable" });
     // The rules that used to come from the runtime are applied: base reset, [hidden], tree rows and icons.
     const styles = await page.evaluate(() => {

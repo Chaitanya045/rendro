@@ -94,5 +94,8 @@
   "public/rum.js": {
     "1": "2d874258cdf8d75a9772274046020089825f6e7af3319be733bbcc83c9c08d11",
     "2": "a98e92caba456ab7b0f9b76def5da1fe4391184a1b0886c3f9472c35df567207"
+  },
+  "public/shell.js": {
+    "1": "9e447875743fa39568c200574e4b0dd50c668e61f1019d0df2a2accff167d18c"
   }
 }
