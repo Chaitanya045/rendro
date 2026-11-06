@@ -841,9 +841,13 @@ describe("first views enqueue the ingest", () => {
     await untilEnqueued(coordinator);
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
+    // The poll joins the same flight and waits in its own window: no second call lands. Its window timer is how the test knows it is waiting.
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const windows = () => timers.mock.calls.filter(call => call[1] === PREPARE_WINDOW_MS).length;
+    const before = windows();
     const second = get(fresh);
-    for (let spins = 0; spins < 3000 && fixture.access.calls.authorize.length < 2; spins += 1) await new Promise(resolve => setImmediate(resolve));
-    for (let spins = 0; spins < 10; spins += 1) await new Promise(resolve => setImmediate(resolve)); // the poll joins the same flight and waits in its own window: no second call lands
+    for (let spins = 0; spins < 5000 && windows() === before; spins += 1) await new Promise(resolve => setImmediate(resolve));
+    expect(windows()).toBeGreaterThan(before);
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await second).headers.get(READINESS_HEADER)).toBe("preparing");
     expect(coordinator.calls).toHaveLength(1);
