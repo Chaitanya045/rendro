@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { kvRevocationEpochs } from "../src/repo-read/access";
+import { kvRevocationEpochs, kvVisibilityEpochs } from "../src/repo-read/access";
 import { authorizeRepo, CAPABILITY_TTL_SECONDS, clearAuthorizationMemory, mintTicket, authorizeTicket, type AuthorizeDependencies, type Viewer } from "../src/repo-read/authorize";
 import { accessFixture } from "./helpers/repo-access-fixture";
 
@@ -16,7 +16,7 @@ const sessions: Record<string, string> = { "member-session": "user-member", "rea
 function readPath(world: ReturnType<typeof accessFixture>) {
   const background: Array<Promise<unknown>> = [];
   const deps: AuthorizeDependencies = {
-    secret: SECRET, permissions: world.directory, epochs: kvRevocationEpochs(world.kv),
+    secret: SECRET, permissions: world.directory, epochs: kvRevocationEpochs(world.kv), visibility: kvVisibilityEpochs(world.kv),
     identity: (request) => {
       const token = /better-auth\.session_token=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
       const id = token ? sessions[token] : undefined;
@@ -86,24 +86,26 @@ describe("revocation through the read path", () => {
     expect(deniedAfter * 1000).toBeLessThanOrEqual(5 * 60_000 + CAPABILITY_TTL_SECONDS * 1000);
   });
 
-  it("ends a signed-in stranger's read of a repository made private within its cookie's lifetime, sooner once the background refresh has run (#354)", async () => {
+  it("ends a signed-in stranger's read of a repository made private as soon as the visibility epoch arrives, cookie and ticket alike (#354)", async () => {
     const world = accessFixture();
     await world.setup();
     const read = readPath(world);
     // The outsider holds no installation access: they read the public repository on its visibility alone.
     expect(await read.view("outsider-session", world.open)).toBe("granted");
     expect(Object.keys(read.jar())).toEqual(["__Host-rendro-repo.801"]);
-    world.open.isPrivate = true;
-    await world.deliver("repository", { action: "privatized", ...world.repoPayload(world.open) });
-    // A new reader is denied at once; the cookie holder is served from the cookie until it is half-way through its life.
-    expect(await readPath(world).view("outsider-session", world.open)).toBe("denied");
-    world.clock.time += 100_000;
-    expect(await read.view("outsider-session", world.open)).toBe("granted");
-    // Past half-way the cookie is still honoured while the refresh runs, and the next view carries its answer.
+    const granted = await authorizeRepo(read.deps, new Request("https://rendro.test/", { headers: { cookie: `better-auth.session_token=outsider-session; __Host-rendro-repo.801=${read.jar()["__Host-rendro-repo.801"]}` } }), "octo", "open-docs");
+    const ticket = await mintTicket(read.deps, (granted as { grant: Parameters<typeof mintTicket>[1] }).grant, "a".repeat(40));
+    // Still public a minute later: the cookie and the ticket answer on the epochs alone.
     world.clock.time += 60_000;
     expect(await read.view("outsider-session", world.open)).toBe("granted");
+    expect((await authorizeTicket(read.deps, ticket, "octo", "open-docs", "a".repeat(40))).kind).toBe("granted");
+    world.open.isPrivate = true;
+    await world.deliver("repository", { action: "privatized", ...world.repoPayload(world.open) });
+    // A new reader is denied at once, and so is the holder of the cookie and of the ticket: the epoch moved after they were issued.
+    expect(await readPath(world).view("outsider-session", world.open)).toBe("denied");
     expect(await read.view("outsider-session", world.open)).toBe("denied");
     expect(read.jar()).toEqual({});
+    expect((await authorizeTicket(read.deps, ticket, "octo", "open-docs", "a".repeat(40))).kind).toBe("denied");
   });
 
   it("denies everyone after an uninstall, and 503s rather than allowing when GitHub is down past the TTL", async () => {

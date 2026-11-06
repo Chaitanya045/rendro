@@ -668,7 +668,7 @@ describe("authorization edge cases", () => {
   let viewer: Viewer;
   let clock: number;
   const deps = (): AuthorizeDependencies => ({
-    secret, permissions: access, epochs: access, identity: () => Promise.resolve(viewer), now: () => clock, waitUntil: promise => void pending.push(promise),
+    secret, permissions: access, epochs: access, visibility: access, identity: () => Promise.resolve(viewer), now: () => clock, waitUntil: promise => void pending.push(promise),
   });
   const request = (cookie = "") => new Request("https://rendro.test/r/octo/docs", { headers: { cookie } });
   const session = "better-auth.session_token=t";
@@ -709,6 +709,80 @@ describe("authorization edge cases", () => {
     // The cookie answers, and it remembers that the repository was public.
     expect(again).toMatchObject({ kind: "granted", grant: { repo: { id: 8, private: false }, viewer: "user-1" }, cookies: [] });
     expect(access.calls.authorize.length).toBe(calls);
+  });
+
+  describe("a capability for a public repository follows its visibility epoch", () => {
+    const open: RepoRecord = { ...repo, id: 8, name: "open", private: false };
+    const openRequest = (cookie = "") => new Request("https://rendro.test/r/octo/open", { headers: { cookie } });
+
+    async function openCookie(): Promise<{ cookie: string; ticket: string }> {
+      const first = await authorizeRepo(deps(), openRequest(session), "octo", "open");
+      if (first.kind !== "granted") throw new Error(first.kind);
+      return { cookie: `${session}; ${first.cookies[0].split(";", 1)[0]}`, ticket: await mintTicket(deps(), first.grant, commit) };
+    }
+
+    beforeEach(() => access.addRepo(open));
+
+    it("honours a cookie and a ticket while the epoch is older than their issue time, with no permission lookup", async () => {
+      access.privatize(8, clock - 5_000);
+      const { cookie, ticket } = await openCookie();
+      const calls = access.calls.authorize.length;
+      expect(await authorizeRepo(deps(), openRequest(cookie), "octo", "open")).toMatchObject({ kind: "granted", cookies: [] });
+      expect((await authorizeTicket(deps(), ticket, "octo", "open", commit)).kind).toBe("granted");
+      expect(access.calls.authorize.length).toBe(calls);
+    });
+
+    it("refuses a ticket and decides a cookie afresh once the epoch moves after they were issued", async () => {
+      const { cookie, ticket } = await openCookie();
+      clock += 2_000;
+      access.privatize(8, clock);
+      access.addRepo({ ...open, private: true });
+      expect(await authorizeTicket(deps(), ticket, "octo", "open", commit)).toEqual({ kind: "denied", cookies: [] });
+      const result = await authorizeRepo(deps(), openRequest(cookie), "octo", "open");
+      expect(result.kind).toBe("denied");
+      expect((result as { cookies: string[] }).cookies).toEqual([expect.stringContaining("rendro-repo.8=; ")]);
+    });
+
+    it("re-grants a repository that is public again from the source, and the new cookie holds", async () => {
+      const { cookie } = await openCookie();
+      clock += 2_000;
+      access.privatize(8, clock);
+      clock += 2_000;
+      const renewed = await authorizeRepo(deps(), openRequest(cookie), "octo", "open");
+      if (renewed.kind !== "granted") throw new Error(renewed.kind);
+      const next = `${session}; ${renewed.cookies.at(-1)?.split(";", 1)[0]}`;
+      expect(await authorizeRepo(deps(), openRequest(next), "octo", "open")).toMatchObject({ kind: "granted", cookies: [] });
+    });
+
+    it("answers unavailable, never granted, when the visibility epoch cannot be read", async () => {
+      const { cookie, ticket } = await openCookie();
+      vi.spyOn(access, "visibilityEpoch").mockRejectedValue(new RepoAccessUnavailable());
+      expect(await authorizeRepo(deps(), openRequest(cookie), "octo", "open")).toEqual({ kind: "unavailable", retryAfter: "1" });
+      expect(await authorizeTicket(deps(), ticket, "octo", "open", commit)).toEqual({ kind: "unavailable", retryAfter: "1" });
+    });
+
+    it("reads both epochs in one round", async () => {
+      const { cookie } = await openCookie();
+      let release: () => void = () => {};
+      const user = vi.spyOn(access, "currentEpoch").mockImplementation(() => new Promise<number>(resolve => { release = () => resolve(0); }));
+      const visibility = vi.spyOn(access, "visibilityEpoch");
+      const pendingRead = authorizeRepo(deps(), openRequest(cookie), "octo", "open");
+      await vi.waitFor(() => expect(user).toHaveBeenCalledTimes(1));
+      // The visibility read was issued before the user's epoch answered.
+      expect(visibility).toHaveBeenCalledTimes(1);
+      release();
+      expect((await pendingRead).kind).toBe("granted");
+    });
+
+    it("leaves a private repository's cookie and ticket to the user's epoch alone", async () => {
+      access.privatize(7, clock + 60_000);
+      const visibility = vi.spyOn(access, "visibilityEpoch");
+      const cookie = await cookieFor();
+      expect(await authorizeRepo(deps(), request(cookie), "octo", "docs")).toMatchObject({ kind: "granted", cookies: [] });
+      const ticket = await mintTicket(deps(), issueGrant(repo, "user-1", 0), commit);
+      expect((await authorizeTicket(deps(), ticket, "octo", "docs", commit)).kind).toBe("granted");
+      expect(visibility).not.toHaveBeenCalled();
+    });
   });
 
   it("decides afresh when a refresh finds the name now belongs to another repository", async () => {

@@ -6,7 +6,8 @@
  *
  * 1. A capability cookie for this `owner/name`, signed, unexpired, bound to the
  *    request's session cookie and minted at the reader's current revocation
- *    epoch, grants without contacting anything but the epoch store. Past half
+ *    epoch (and, for a public repository, before its visibility epoch last
+ *    moved), grants without contacting anything but the epoch store. Past half
  *    its lifetime it is re-checked in the background (`waitUntil`) and the
  *    next request in this isolate carries the renewed cookie, or is denied.
  * 2. Otherwise (a miss, an expired or revoked cookie): the session, then the
@@ -18,7 +19,7 @@
  */
 import { cookieSite, sessionTokenCookie } from "@/viewer-ticket";
 import { constantTimeEqual } from "../../shared/constant-time";
-import { repoKey, type RepoPermissionSource, type RepoRecord, type RevocationEpochs } from "./access";
+import { repoKey, type RepoPermissionSource, type RepoRecord, type RepoVisibilityEpochs, type RevocationEpochs } from "./access";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "./capability";
 import { issueGrant, type RepoGrant } from "./grant";
 
@@ -28,6 +29,8 @@ export interface AuthorizeDependencies {
   secret: string;
   permissions: RepoPermissionSource;
   epochs: RevocationEpochs;
+  /** Visibility epochs: a capability for a public repository is only as current as these (the user's epoch cannot cover readers who never held it). */
+  visibility: RepoVisibilityEpochs;
   /** The signed-in user behind the request's session cookie (a Convex round trip, cached briefly). */
   identity(request: Request): Promise<Viewer>;
   now(): number;
@@ -137,6 +140,21 @@ function scheduleRefresh(deps: AuthorizeDependencies, request: Request, claims: 
   })());
 }
 
+/**
+ * Whether a capability is still current: minted at the user's current revocation epoch and, when it says the
+ * repository was public, issued after the repository last became invisible (its visibility epoch, milliseconds,
+ * against the claim's issue time in seconds). Private capabilities rest on the user's epoch alone: their holders
+ * are bumped one by one, which a public repository's readers cannot be. Both epochs are read at once; a failed
+ * read throws, which the caller turns into `unavailable`, never a grant.
+ */
+async function capabilityCurrent(deps: AuthorizeDependencies, claims: CapabilityClaims): Promise<boolean> {
+  const [userEpoch, visibilityEpoch] = await Promise.all([
+    deps.epochs.currentEpoch(claims.u),
+    claims.p ? Promise.resolve(0) : deps.visibility.visibilityEpoch(claims.r),
+  ]);
+  return claims.e >= userEpoch && visibilityEpoch <= claims.i * 1000;
+}
+
 function grantFromClaims(claims: CapabilityClaims, owner: string, name: string): RepoGrant {
   return issueGrant({ id: claims.r, owner, name, private: claims.p, defaultBranch: claims.b }, claims.u, claims.e, claims.x * 1000);
 }
@@ -153,7 +171,7 @@ export async function authorizeRepo(deps: AuthorizeDependencies, request: Reques
   const { claims, stale } = await capabilityCookies(deps, request, key, session);
   const cookies = stale.map(repoId => clearCookie(secure, repoId));
   try {
-    if (claims && claims.x * 1000 - deps.now() >= minRemainingMs && claims.e >= await deps.epochs.currentEpoch(claims.u)) {
+    if (claims && claims.x * 1000 - deps.now() >= minRemainingMs && await capabilityCurrent(deps, claims)) {
       const nowSeconds = Math.floor(deps.now() / 1000);
       if (nowSeconds - claims.i < CAPABILITY_TTL_SECONDS / 2) return { kind: "granted", grant: grantFromClaims(claims, owner, name), cookies };
       const refreshed = refreshes.get(refreshId(claims));
@@ -199,14 +217,15 @@ export async function mintTicket(deps: Pick<AuthorizeDependencies, "secret" | "n
 }
 
 /**
- * Requests from the opaque frame carry no cookies: the ticket alone authorizes, bounded by its lifetime and the epoch.
+ * Requests from the opaque frame carry no cookies: the ticket alone authorizes, bounded by its lifetime and the epochs
+ * (the user's, and for a public repository its visibility epoch).
  * It authorizes assets only; the read path never parses a page under a ticket (#293).
  */
 export async function authorizeTicket(deps: AuthorizeDependencies, ticket: string, owner: string, name: string, commit: string): Promise<Authorization> {
   const claims = await verifyCapability(deps.secret, "ticket", ticket, Math.floor(deps.now() / 1000));
   if (!claims || claims.n !== repoKey(owner, name) || claims.c !== commit) return { kind: "denied", cookies: [] };
   try {
-    if (claims.e < await deps.epochs.currentEpoch(claims.u)) return { kind: "denied", cookies: [] };
+    if (!await capabilityCurrent(deps, claims)) return { kind: "denied", cookies: [] };
   } catch {
     return { kind: "unavailable", retryAfter: "1" };
   }

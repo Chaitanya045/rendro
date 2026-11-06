@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import {
-  repoAccessHandler, repoKey, RepoAccessUnavailable, repoModerationHandler, type ModerationRole, type RepoModerationSource, type RepoPermissionSource, type RepoRecord, type RevocationEpochs,
+  repoAccessHandler, repoKey, RepoAccessUnavailable, repoModerationHandler, type ModerationRole, type RepoModerationSource, type RepoPermissionSource, type RepoRecord, type RepoVisibilityEpochs, type RevocationEpochs,
 } from "../../src/repo-read/access";
 import { clearAuthorizationMemory } from "../../src/repo-read/authorize";
 import { clearSnapshotMemory, type EdgeCache } from "../../src/repo-read/snapshot";
@@ -15,7 +15,7 @@ import { sessionCache } from "../../src/session-cache";
  * epochs (#234). It is what P5's GitHub-backed implementation replaces:
  * repositories by name, readers per repository, an epoch per user.
  */
-export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationSource, RevocationEpochs {
+export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationSource, RevocationEpochs, RepoVisibilityEpochs {
   readonly repos = new Map<string, RepoRecord>();
   readonly readers = new Map<number, Set<string>>();
   readonly epochs = new Map<string, number>();
@@ -62,10 +62,21 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationS
     return Promise.resolve(!repo.private || this.readers.get(repo.id)?.has(viewer) ? repo : null);
   }
 
+  /** A repository stopped being public (private, removed, uninstalled): the control Worker's visibility epoch (ms). */
+  privatize(repoId: number, at = Date.now()): void {
+    this.epochs.set(`repo:${repoId}`, at);
+  }
+
   currentEpoch(userId: string): Promise<number> {
     this.calls.epochs += 1;
     if (this.epochsUnavailable) return Promise.reject(new RepoAccessUnavailable());
     return Promise.resolve(this.epochs.get(userId) ?? 0);
+  }
+
+  visibilityEpoch(repoId: number): Promise<number> {
+    this.calls.epochs += 1;
+    if (this.epochsUnavailable) return Promise.reject(new RepoAccessUnavailable());
+    return Promise.resolve(this.epochs.get(`repo:${repoId}`) ?? 0);
   }
 }
 

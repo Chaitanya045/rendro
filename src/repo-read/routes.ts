@@ -142,7 +142,7 @@ function services(c: Context, timing = new ReadTiming()): Services | null {
   const probe = sharedProbe && ((info: SharedCacheProbe) => { sharedProbe.last = `cf=${info.cacheStatus ?? "-"}; age=${info.age ?? "-"}`; });
   return {
     authorize: {
-      secret: REPO_CAPABILITY_SECRET, permissions: serviceRepoPermissions(access as Fetcher), epochs: kvRevocationEpochs(epochs as KvReader),
+      secret: REPO_CAPABILITY_SECRET, permissions: serviceRepoPermissions(access as Fetcher), epochs: kvRevocationEpochs(epochs as KvReader), visibility,
       identity: sessionViewer, now, waitUntil,
     },
     snapshots: new RepoSnapshots({
