@@ -3,7 +3,7 @@ import { GitHubError } from "../src/ingest/github/source";
 import { RepoAccessUnavailable } from "../src/repo-read/access";
 import { EPOCH_TTL_SECONDS, FAILURE_COOLDOWN_MS, MAX_REPOSITORY_PAGES, MIRROR_TTL_MS, PUBLIC_CONFIRM_MAX_MS, PUBLIC_CONFIRM_TTL_MS } from "../src/repo-access/directory";
 import { openTokens, sealTokens, type TokenRefresher } from "../src/repo-access/tokens";
-import { accessFixture, mintedInstallationTokens, TOKEN_KEY } from "./helpers/repo-access-fixture";
+import { accessFixture, mintedInstallationTokens, STRANGER, TOKEN_KEY } from "./helpers/repo-access-fixture";
 
 /**
  * The permission mirror and revocation epochs (#243) against a fake GitHub:
@@ -88,7 +88,7 @@ describe("answers from the registry and the mirror", () => {
     expect(await world.directory.authorize("user-stranger", "octo", "closed-docs")).toBeNull();
   });
 
-  it("never asks GitHub on behalf of an anonymous reader of a repository recorded as private", async () => {
+  it("never asks GitHub on behalf of a reader with no GitHub link about a repository recorded as private", async () => {
     const world = accessFixture();
     await world.setup();
     expect(await world.read(null, world.closed)).toBeNull();
@@ -516,11 +516,11 @@ describe("webhooks update the mirror, then the epoch", () => {
     installation.account = "octo-labs";
     const openMoved = world.github.rename(world.open, "octo-labs", "open-docs");
     await world.deliver("organization", { action: "renamed", organization: { login: "octo-labs" }, changes: { login: { from: "octo" } } });
-    expect(await world.directory.authorize(null, "octo", "open-docs")).toBeNull();
+    expect(await world.directory.authorize(STRANGER, "octo", "open-docs")).toBeNull();
     expect(await world.read(null, openMoved)).toEqual(record(openMoved));
     expect((await world.storage.get<{ owner: string; private: boolean }>("repo:950"))).toMatchObject({ owner: "other-org", private: true });
     // Its installation was never announced: nobody reads it.
-    expect(await world.directory.authorize(null, "other-org", "docs")).toBeNull();
+    expect(await world.directory.authorize(STRANGER, "other-org", "docs")).toBeNull();
     // A hint without visibility or installation keeps what the registry knew.
     await world.apply({ repos: { change: "confirm", hints: [{ id: world.open.id, owner: "octo-labs", name: "open-docs", private: null }], installation: null }, revoke: false });
     expect(await world.storage.get(`repo:${world.open.id}`)).toMatchObject({ private: false, installation: world.installation.id, check: true });

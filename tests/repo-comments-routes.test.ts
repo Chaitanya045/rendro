@@ -64,8 +64,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** Every read needs a signed-in reader (#354): without a cookie of its own a request is the outsider's. */
 function request(path: string, init: { method?: string; headers?: Record<string, string> } = {}) {
-  return app.request(`${ORIGIN}${path}`, { method: init.method ?? "GET", headers: init.headers ?? {} }, fixture.env, fixture.ctx);
+  return app.request(`${ORIGIN}${path}`, { method: init.method ?? "GET", headers: { cookie: sessions.outsider, ...init.headers } }, fixture.env, fixture.ctx);
 }
 
 function access(base: string, headers: Record<string, string> = {}, query = "") {
@@ -113,10 +114,11 @@ describe("comment access mirrors read access", () => {
     const response = await access(pub);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(response.headers.getSetCookie()).toEqual([]);
+    // Every grant now rests on a signed-in reader's capability cookie (#354); public comments themselves go with #353.
+    expect(response.headers.getSetCookie()).toHaveLength(1);
     const body = await response.json() as { repoId: number; private: boolean; expiresAt: number };
     expect(body).toEqual({ repoId: publicRepo.id, private: false, expiresAt: expect.any(Number) });
-    expect(body.expiresAt - before).toBeLessThanOrEqual(60_000 + 50);
+    expect(body.expiresAt - before).toBeLessThanOrEqual(CAPABILITY_TTL_SECONDS * 1000 + 50);
     expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 0, expiresAt: body.expiresAt }]);
     // A signed-in reader of a public repository holds the same public grant.
     expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
@@ -239,16 +241,6 @@ describe("the first comments come with the first access answer (#284)", () => {
     // A public grant names no reader; its page is read for the session's reader, so their own threads carry their actions.
     expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
     expect(grants).toEqual([expect.objectContaining({ repoId: publicRepo.id, userId: null })]);
-  });
-
-  it("reads a public first page as anonymous for a reader the session does not name (#303)", async () => {
-    // No session, a session the backend does not know, and a session check that is down: anyone may read the page.
-    for (const cookie of [undefined, "__Host-better-auth.session_token=unknown-token.sig", "__Host-better-auth.session_token=down-token.sig"]) {
-      const response = await access(pub, cookie ? { cookie } : {}, first);
-      expect(response.status).toBe(200);
-      expect((await response.json() as { threads?: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
-    }
-    expect(snapshots).toEqual(Array.from({ length: 3 }, () => ({ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0 })));
   });
 
   it("hands a private repository's first page to its reader only, at the epoch the read path checked", async () => {
@@ -389,19 +381,18 @@ describe("moderators of a repository's comments (#259)", () => {
     const response = await access(pub, { cookie: sessions.reader }, first);
     const { expiresAt } = await response.json() as { expiresAt: number };
     expect(moderatorGrants).toEqual([{ repoId: publicRepo.id, userId: users.reader, role: "admin", epoch: 9, expiresAt }]);
-    expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 0, expiresAt }]);
-    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader, moderator: true }]);
+    expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 9, expiresAt }]);
+    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 9, viewerId: users.reader, moderator: true }]);
   });
 
-  it("gives no role to a reader who is not a moderator, an anonymous reader or a reader the session cannot name, and remembers it", async () => {
+  it("gives no role to a reader who is not a moderator, and remembers it", async () => {
     // Writers, triagers and readers are not moderators: the control Worker says null for them.
     expect((await access(pub, { cookie: sessions.reader }, first)).status).toBe(200);
     expect((await access(pub, { cookie: sessions.reader }, first)).status).toBe(200);
     expect(fixture.access.calls.moderation).toHaveLength(1);
-    for (const headers of [{}, { cookie: "__Host-better-auth.session_token=unknown-token.sig" }, { cookie: "__Host-better-auth.session_token=down-token.sig" }] as Array<Record<string, string>>) {
-      expect((await access(pub, headers, first)).status).toBe(200);
-    }
-    expect(fixture.access.calls.moderation).toHaveLength(1);
+    // The stranger, who is signed in but holds no role, is asked once too.
+    expect((await access(pub, {}, first)).status).toBe(200);
+    expect(fixture.access.calls.moderation).toHaveLength(2);
     expect(moderatorGrants).toEqual([]);
     expect(snapshots.every(asked => !("moderator" in asked))).toBe(true);
   });

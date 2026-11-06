@@ -30,12 +30,13 @@ async function searchFixture() {
   return { ...fixture, snapshot: snapshot!, pages, env: { ...fixture.env, REPO_SEARCH: database } };
 }
 
+/** Every read needs a signed-in reader (#354): by default the stranger, who may read public repositories only. */
 const get = (
   path: string,
   env: Parameters<typeof app.request>[2],
   ctx: Parameters<typeof app.request>[3],
   headers: Record<string, string> = {},
-) => app.request(`https://rendro.test${path}`, { headers }, env, ctx);
+) => app.request(`https://rendro.test${path}`, { headers: { cookie: sessionCookies.outsider, ...headers } }, env, ctx);
 
 function expectPlainNotFound(response: Response) {
   expect(response.status).toBe(404);
@@ -46,6 +47,7 @@ function expectPlainNotFound(response: Response) {
 
 describe("repository search endpoint (GET /r/:owner/:repo/search)", () => {
   it("answers 404 without a search binding, like every other configured-in-tests-only surface", async () => {
+    stubSessions();
     const fixture = await repoReadFixture();
     expectPlainNotFound(await get("/r/octo/public-docs/search?q=welcome", fixture.env, fixture.ctx));
   });

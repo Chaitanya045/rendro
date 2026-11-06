@@ -5,7 +5,7 @@ import { RENDERER_VERSION } from "@/ingest/limits";
 import { manifestKey } from "@/ingest/orchestrator/keys";
 import worker from "@/worker";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
-import { publicRepo, repoReadFixture } from "./helpers/repo-read-fixture";
+import { publicRepo, repoReadFixture, sessionCookies, stubSessions } from "./helpers/repo-read-fixture";
 
 /*
  * Comments on repository docs in Chromium (#254). The document frame is the real Worker's, with its real policy
@@ -85,11 +85,12 @@ beforeAll(async () => {
       response.end(`<!doctype html><meta charset="utf-8"><body>${body}<script src="/commentor.js" data-commentor-config="${config.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"></script></body>`);
       return;
     }
-    void Promise.resolve(worker.request(url.href, {}, fixture.env, fixture.ctx)).then(reply => send(response, reply));
+    void Promise.resolve(worker.request(url.href, { headers: { cookie: sessionCookies.reader } }, fixture.env, fixture.ctx)).then(reply => send(response, reply));
   }, assets);
 });
 
 beforeEach(async () => {
+  stubSessions();
   fixture = await repoReadFixture();
   await addGuide(fixture.commits.public);
 });

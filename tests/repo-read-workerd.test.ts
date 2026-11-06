@@ -147,33 +147,46 @@ afterAll(async () => {
 
 const reader = "better-auth.session_token=reader-token.sig";
 
-async function capabilityCookie(): Promise<string> {
-  const response = await get("/r/octo/closed-docs", { cookie: reader });
+/** The reader's session plus the capability cookie one signed-in view of the repository earns (every read needs a signed-in reader, #354). */
+async function capabilityCookie(path = "/r/octo/closed-docs", id = 702): Promise<string> {
+  const response = await get(path, { cookie: reader });
   expect(response.status).toBe(200);
   await response.arrayBuffer();
-  const cookie = response.headers.getSetCookie().find(value => value.startsWith("rendro-repo.702="));
+  const cookie = response.headers.getSetCookie().find(value => value.startsWith(`rendro-repo.${id}=`));
   expect(cookie).toMatch(/; HttpOnly; SameSite=Lax$/);
   return `${reader}; ${(cookie as string).split(";", 1)[0]}`;
 }
 
 describe("repository read path on workerd", () => {
   it("serves a public repository's shell, frame, image and tree", async () => {
-    const shell = await get("/r/octo/open-docs");
+    // Signed out, a navigation is sent to sign in and everything else is the plain 404 (#354).
+    const anonymous = await get("/r/octo/open-docs");
+    expect(anonymous.status).toBe(302);
+    expect(anonymous.headers.get("Location")).toBe("/sign-in?returnTo=%2Fr%2Focto%2Fopen-docs");
+    expect((await get(`/r/octo/open-docs/@${publicCommit}/files/docs/index.md`)).status).toBe(404);
+    const cookie = await capabilityCookie("/r/octo/open-docs", 701);
+    const shell = await get("/r/octo/open-docs", { cookie });
     expect(shell.status).toBe(200);
     expect(shell.headers.get("Cache-Control")).toBe("private, no-cache");
     expect(await shell.text()).toContain(`data-frame-base="/r/octo/open-docs/@${publicCommit}"`);
-    const frame = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/index.md`);
-    expect(frame.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
-    expect(await frame.text()).toContain('<a href="guide/start.md">guide</a>');
-    const image = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/img/logo.png`);
+    const frame = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/index.md`, { cookie });
+    expect(frame.headers.get("Cache-Control")).toBe("private, max-age=300");
+    const html = await frame.text();
+    expect(html).toContain('<a href="guide/start.md">guide</a>');
+    // The cookie-less sandbox loads the frame's images by ticket.
+    const prefix = /<img src="([^"]+\/view\/[^/"]+\/files\/)/.exec(html)?.[1] as string;
+    const ticketed = await get(`${prefix}docs/img/logo.png`);
+    expect(ticketed.status).toBe(200);
+    await ticketed.arrayBuffer();
+    const image = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/img/logo.png`, { cookie });
     expect(image.headers.get("Content-Type")).toBe("image/png");
     expect((await image.arrayBuffer()).byteLength).toBe(12);
-    const tree = await get(`/r/octo/open-docs/@${publicCommit}/tree?dir=docs%2F`);
+    const tree = await get(`/r/octo/open-docs/@${publicCommit}/tree?dir=docs%2F`, { cookie });
     expect(((await tree.json()) as { children: unknown[] }).children).toContainEqual({ name: "guide", type: "folder", title: "Guide" });
   });
 
   it("grants a private reader through the control Worker, serves images by ticket, and revokes with a KV epoch", async () => {
-    expect((await get("/r/octo/closed-docs")).status).toBe(404);
+    expect((await get("/r/octo/closed-docs")).status).toBe(302);
     expect((await get("/r/octo/closed-docs", { cookie: "better-auth.session_token=outsider-token.sig" })).status).toBe(404);
     const cookie = await capabilityCookie();
     const frame = await get(`/r/octo/closed-docs/@${privateCommit}/files/docs/index.md`, { cookie: cookie.split("; ")[1] + "; " + reader });
@@ -193,21 +206,22 @@ describe("repository read path on workerd", () => {
 
   it("measures server time for a cached view, an R2 miss and a capability-cookie miss", async () => {
     const cookie = await capabilityCookie();
+    const publicCookie = await capabilityCookie("/r/octo/open-docs", 701);
     const privateFrame = `/r/octo/closed-docs/@${privateCommit}/files/docs/index.md`;
     const publicFrame = `/r/octo/open-docs/@${publicCommit}/files/docs/index.md`;
     // Warm the isolate: pointer, manifests, renders, the imported HMAC key and the socket.
     for (let index = 0; index < 20; index += 1) {
       await timed(privateFrame, { cookie });
-      await timed(publicFrame, {});
+      await timed(publicFrame, { cookie: publicCookie });
       await timed("/r/octo/closed-docs", { cookie });
     }
     const results = {
       "/health (Hono stack, no storage)": await sample(samples, () => "/health"),
       "cached private frame (cookie hit)": await sample(samples, () => privateFrame, { cookie }),
-      "cached public frame": await sample(samples, () => publicFrame),
+      "cached public frame (cookie hit)": await sample(samples, () => publicFrame, { cookie: publicCookie }),
       "cached private shell, branch URL": await sample(samples, () => "/r/octo/closed-docs", { cookie }),
       // Each page is new to the isolate and to the colo cache: one R2 read of its rendered object.
-      "R2 miss (render object)": await sample(pages, index => `/r/octo/open-docs/@${publicCommit}/files/docs/pages/page-${index}.md`),
+      "R2 miss (render object)": await sample(pages, index => `/r/octo/open-docs/@${publicCommit}/files/docs/pages/page-${index}.md`, { cookie: publicCookie }),
       // The same for a private repository (#263): the render object is sealed in R2 and opened after authorization.
       "R2 miss, private (sealed render object)": await sample(pages, index => `/r/octo/closed-docs/@${privateCommit}/files/docs/pages/page-${index}.md`, { cookie }),
       // No capability cookie: session lookup (answered in-process here), KV epoch, control Worker, a new cookie.
@@ -220,7 +234,8 @@ describe("repository read path on workerd", () => {
 
   it("searches the 1,000-page repository through the pinned commit, bounded, and measures the server time", async () => {
     // Results come from this repository's served snapshot only: path and slug resolve onto it.
-    const response = await get("/r/octo/big-docs/search?q=zebra&limit=20");
+    const searchCookie = await capabilityCookie("/r/octo/big-docs", 703);
+    const response = await get("/r/octo/big-docs/search?q=zebra&limit=20", { cookie: searchCookie });
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     const payload = await response.json() as { status: string; more: boolean; results: Array<{ path: string; slug: string; snippet: string }> };
@@ -231,13 +246,13 @@ describe("repository read path on workerd", () => {
     expect(payload.results[0].snippet).toContain("\u0002zebra");
     // The query is scoped by repository id: another repository (open-docs, ingested without an
     // index pass here) and a blob outside this manifest contribute nothing.
-    const other = await get("/r/octo/open-docs/search?q=zebra");
+    const other = await get("/r/octo/open-docs/search?q=zebra", { cookie: await capabilityCookie("/r/octo/open-docs", 701) });
     expect(((await other.json()) as { results: unknown[] }).results).toEqual([]);
 
     // Server time over sequential requests, cycling the query terms.
     const terms = ["zebra", "installation", "prose", "follows"];
     const results = {
-      "search query (1,000-page repo, limit 20)": await sample(samples, index => `/r/octo/big-docs/search?q=${terms[index % terms.length]}&limit=20`),
+      "search query (1,000-page repo, limit 20)": await sample(samples, index => `/r/octo/big-docs/search?q=${terms[index % terms.length]}&limit=20`, { cookie: searchCookie }),
     };
     console.log(["repository search, workerd loopback HTTP (p50 / p90 ms):",
       ...Object.entries(results).map(([name, { p50, p90 }]) => `  ${name}: ${p50.toFixed(2)} / ${p90.toFixed(2)}`)].join("\n"));

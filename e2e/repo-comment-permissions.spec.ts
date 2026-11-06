@@ -44,7 +44,7 @@ async function forgedWrites(token: string | undefined, scope: { repoId: number; 
   ];
 }
 
-test("an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write", async ({ page, secondContext, seeded, seed, baseURL }) => {
+test("an outsider is refused a private repository's comments, and a visitor who is not signed in is sent to sign in", async ({ page, secondContext, seeded, seed, baseURL }) => {
   test.setTimeout(240_000);
   const { comments, commentsPrivate } = repos();
   // Idempotent start: the owner is a collaborator (a retry of another spec may have removed them).
@@ -72,9 +72,11 @@ test("an outsider is refused a private repository's comments, and anonymous read
   for (const [label, result] of await forgedWrites(outsiderToken, privateScope, privateThread._id, privateAnchor)) {
     expect(result, label).toMatchObject({ ok: false, code: "not_found" });
   }
-  // An anonymous visitor is refused the same way.
+  // A visitor who is not signed in is sent to sign in (#354), and Convex refuses them the same way.
   const anonymous = await secondContext.newPage();
-  expect((await anonymous.goto(`${url}?doc=docs%2Fprivate.md`))?.status()).toBe(404);
+  const redirect = await anonymous.request.get(`${url}?doc=docs%2Fprivate.md`, { maxRedirects: 0 });
+  expect(redirect.status()).toBe(302);
+  expect(redirect.headers().location).toBe(`/sign-in?returnTo=${encodeURIComponent(`${url}?doc=docs%2Fprivate.md`)}`);
   expect(await threadsAs(undefined, privateScope)).toEqual([]);
   for (const [label, result] of await forgedWrites(undefined, privateScope, privateThread._id, privateAnchor)) {
     expect(result, label).toMatchObject({ ok: false, code: "not_found" });
@@ -82,8 +84,7 @@ test("an outsider is refused a private repository's comments, and anonymous read
   // Nothing was written by any of the refused callers.
   expect((await threadsAs(ownerToken, privateScope)).find(thread => thread._id === privateThread._id)).toMatchObject({ body: secret, resolved: false, archived: false, replies: [] });
 
-  // A public repository's comments are anyone's to read: the anonymous reader sees the thread and its reply, and is
-  // offered no way to write, resolve, archive or delete.
+  // A public repository's thread and reply: Convex refuses every write that carries no session.
   const doc = await journeyDoc("anonymous");
   const scope = { repoId: repoIds.comments, path: doc.path };
   await open(page, comments, doc.path, doc.commit);
@@ -94,11 +95,6 @@ test("an outsider is refused a private repository's comments, and anonymous read
   await bubble.getByTestId("commentor-reply-send").click();
   await expect(bubble.locator(".reply:not(.is-sending)")).toContainText("A reply anyone reads");
   const [thread] = await threadsAs(ownerToken, scope);
-  await open(anonymous, comments, doc.path, doc.commit);
-  await expect(pin(anonymous, "Visible to everyone")).toBeVisible();
-  await expect(ui(anonymous).getByTestId("commentor-comment-btn")).toBeDisabled();
-  expect(await offers(anonymous)).toEqual({ "Visible to everyone": { resolve: false, archive: false, delete: false, reply: false } });
-  await expect(card(anonymous, "Visible to everyone").locator(".reply")).toContainText("A reply anyone reads");
   // Convex refuses every anonymous write outright.
   for (const [label, result] of await forgedWrites(undefined, scope, thread._id, await anchorOn(page, "quick brown"))) {
     expect(result, label).toMatchObject({ ok: false, code: "unauthenticated" });

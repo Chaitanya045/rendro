@@ -27,7 +27,7 @@ for (const shell of ["private", "public"] as const) {
         stylesheets.push({ url: response.url(), status: response.status(), type: response.headers()["content-type"], cache: response.headers()["cache-control"] });
       }
     });
-    if (shell === "private") await signInSeeded(context, baseURL, seed, "owner");
+    await signInSeeded(context, baseURL, seed, shell === "private" ? "owner" : "outsider");
     const repo = shell === "private" ? repos().closed : repos().open;
     const response = await page.goto(`/r/${repo.owner}/${repo.name}`);
     expect(response?.status()).toBe(200);

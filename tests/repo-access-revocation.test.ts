@@ -11,7 +11,7 @@ import { accessFixture } from "./helpers/repo-access-fixture";
  */
 
 const SECRET = "test-repo-capability-secret-32-chars";
-const sessions: Record<string, string> = { "member-session": "user-member", "reader-session": "user-reader" };
+const sessions: Record<string, string> = { "member-session": "user-member", "reader-session": "user-reader", "outsider-session": "user-outsider" };
 
 function readPath(world: ReturnType<typeof accessFixture>) {
   const background: Array<Promise<unknown>> = [];
@@ -86,18 +86,24 @@ describe("revocation through the read path", () => {
     expect(deniedAfter * 1000).toBeLessThanOrEqual(5 * 60_000 + CAPABILITY_TTL_SECONDS * 1000);
   });
 
-  it("denies anonymous readers of a repository made private once the serving isolate's public memory expires", async () => {
+  it("ends a signed-in stranger's read of a repository made private within its cookie's lifetime, sooner once the background refresh has run (#354)", async () => {
     const world = accessFixture();
     await world.setup();
     const read = readPath(world);
-    expect(await read.view(null, world.open)).toBe("granted");
+    // The outsider holds no installation access: they read the public repository on its visibility alone.
+    expect(await read.view("outsider-session", world.open)).toBe("granted");
+    expect(Object.keys(read.jar())).toEqual(["__Host-rendro-repo.801"]);
     world.open.isPrivate = true;
     await world.deliver("repository", { action: "privatized", ...world.repoPayload(world.open) });
-    // The isolate remembers a public repository for a minute (#234), then asks again.
-    world.clock.time += 59_000;
-    expect(await read.view(null, world.open)).toBe("granted");
-    world.clock.time += 1_000;
-    expect(await read.view(null, world.open)).toBe("denied");
+    // A new reader is denied at once; the cookie holder is served from the cookie until it is half-way through its life.
+    expect(await readPath(world).view("outsider-session", world.open)).toBe("denied");
+    world.clock.time += 100_000;
+    expect(await read.view("outsider-session", world.open)).toBe("granted");
+    // Past half-way the cookie is still honoured while the refresh runs, and the next view carries its answer.
+    world.clock.time += 60_000;
+    expect(await read.view("outsider-session", world.open)).toBe("granted");
+    expect(await read.view("outsider-session", world.open)).toBe("denied");
+    expect(read.jar()).toEqual({});
   });
 
   it("denies everyone after an uninstall, and 503s rather than allowing when GitHub is down past the TTL", async () => {
@@ -115,11 +121,11 @@ describe("revocation through the read path", () => {
     const other = readPath(fresh);
     clearAuthorizationMemory();
     expect(await other.view("reader-session", fresh.closed)).toBe("granted");
-    expect(await other.view(null, fresh.open)).toBe("granted");
+    expect(await other.view("outsider-session", fresh.open)).toBe("granted");
     fresh.github.installations.delete(fresh.installation.id);
     await fresh.deliver("installation", { action: "deleted" });
     expect(await other.view("reader-session", fresh.closed)).toBe("denied");
-    clearAuthorizationMemory();
-    expect(await other.view(null, fresh.open)).toBe("denied");
+    other.clear();
+    expect(await other.view("outsider-session", fresh.open)).toBe("denied");
   });
 });

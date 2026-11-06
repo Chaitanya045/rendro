@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { test, expect } from "./fixtures";
 import {
-  anchorOn, card, collaborator, comment, commit, convexCallWith, convexSocket, createThread, journeyDoc, open, openDrawer, pin, publicThreads, repoIds, repos,
-  select, sessionToken, ui, unique,
+  anchorOn, card, collaborator, comment, commit, convexSocket, createThread, journeyDoc, open, openDrawer, pin, publicThreads, repoIds, repos,
+  sessionToken, ui, unique,
 } from "./comment-helpers";
 import { desktop, signInSeeded } from "./shell-helpers";
 import { commentDocs } from "./repo-fixtures";
@@ -103,30 +103,6 @@ test("a reader who loses repository access loses its comments at once", async ({
   }
 });
 
-test("an anonymous reader of a public repository sees its comments but cannot post", async ({ page, secondContext, seed, baseURL }) => {
-  const { comments } = repos();
-  const head = await commit({ "docs/guide.md": commentDocs()["docs/guide.md"] });
-  await signInSeeded(page.context(), baseURL, seed, "owner");
-  await open(page, comments, "docs/guide.md", head);
-  const body = unique("Visible to all");
-  await comment(page, "Call the API", body);
-
-  const anonymous = await secondContext.newPage();
-  await open(anonymous, comments, "docs/guide.md", head);
-  await expect(pin(anonymous, body)).toBeVisible();
-  await expect(ui(anonymous).getByTestId("commentor-comment-btn")).toBeDisabled();
-  await select(anonymous, "before anything else");
-  // Two frames later the chip would have opened for a reader who may write.
-  await ui(anonymous).locator("article").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await expect(ui(anonymous).getByTestId("commentor-selection-action")).toHaveAttribute("data-state", "closed");
-  // Convex refuses an anonymous write outright.
-  const forged = await convexCallWith(undefined, "mutation", "repoComments:createThread", {
-    repoId: 9004, path: "docs/guide.md", body: "Drive-by",
-    anchor: { kind: "repo-text", blobSha: "a".repeat(40), headingSlug: "usage", prefix: "", exact: "Call", suffix: "", offset: 0 },
-  });
-  expect(forged).toMatchObject({ ok: false, code: "unauthenticated" });
-});
-
 test("the first comments carry the signed-in author's Archive and Delete before the live page, and nobody else's", async ({ page, secondContext, seed, baseURL }) => {
   test.setTimeout(120_000);
   const { comments, commentsPrivate } = repos();
@@ -160,7 +136,8 @@ test("the first comments carry the signed-in author's Archive and Delete before 
   await expect(card(author, body).getByTestId("commentor-delete-btn")).toBeVisible();
   await author.close();
 
-  // An anonymous reader of the same public page sees the thread with neither.
+  // Another signed-in reader of the same public page (every read needs one, #354) sees the thread with neither.
+  await signInSeeded(secondContext, baseURL, seed, "outsider");
   const anonymous = await secondContext.newPage();
   await firstPaint(anonymous, comments, doc.path, doc.commit);
   await expect(card(anonymous, body)).toBeVisible();

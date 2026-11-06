@@ -234,7 +234,7 @@ describe("Chromium security header smoke", () => {
 
 describe("untrusted reload requests across viewer shells", () => {
   it.each([
-    ["public", publicPath, false, false],
+    ["public", publicPath, true, true],
     ["private", privatePath, true, true],
   ] as const)("never navigates the %s shell without a parent gesture", async (_name, path, signedIn, offersNotice) => {
     const page = await pageFor(signedIn);
@@ -271,7 +271,7 @@ describe("untrusted reload requests across viewer shells", () => {
 
 describe("viewer accessibility under CSP", () => {
   it.each([
-    ["public", publicPath, false],
+    ["public", publicPath, true],
     ["private", privatePath, true],
   ] as const)("exposes one main document landmark in the %s shell", async (_name, path, signedIn) => {
     const page = await pageFor(signedIn);

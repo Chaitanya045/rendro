@@ -36,7 +36,7 @@ import {
 import { rateLimiter, takeToken, type RateLimiter } from "./admission";
 import { admitFirstView, durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
 import {
-  FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument, ticketImageSlots,
+  FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument, ticketImageSlots,
 } from "./frame";
 import type { RepoGrant } from "./grant";
 import { isPagePath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
@@ -55,13 +55,13 @@ const READ_TIMEOUT_MS = 10_000;
 const PREPARING_RETRY_SECONDS = 5;
 /** A client the per-client limiter refused (#294) retries after its window: the limiters count per minute. */
 const LIMITED_RETRY_SECONDS = 60;
-const IMMUTABLE = "max-age=31536000, immutable";
 /**
- * Private reads at a commit URL: a browser keeps them no longer than a capability cookie lasts, so a copy never
- * outlives a session or an access decision by more than that (#293). A private frame also embeds an asset ticket
+ * Reads at a commit URL: a browser keeps them no longer than a capability cookie lasts, so a copy never
+ * outlives a session or an access decision by more than that (#293). Every frame embeds an asset ticket
  * of the same lifetime, which a revalidated (304) copy would keep past its expiry, so it gets no validator either.
+ * Nothing the reader path answers is `public`: every read needs a signed-in reader, public repositories included (#354).
  */
-const PRIVATE_COMMIT = `max-age=${CAPABILITY_TTL_SECONDS}`;
+const READER_COMMIT = `max-age=${CAPABILITY_TTL_SECONDS}`;
 /** Branch URLs: a short freshness window, then revalidation by ETag; stale copies survive an outage. */
 const BRANCH = "max-age=10, stale-if-error=86400";
 
@@ -183,9 +183,9 @@ function notFound(c: Context, kind: Representation): Response {
   return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
 }
 
-function cachePolicy(grant: RepoGrant, ref: RepoRefSpec): string {
-  if (ref.kind !== "commit") return `${grant.repo.private ? "private" : "public"}, ${BRANCH}`;
-  return grant.repo.private ? `private, ${PRIVATE_COMMIT}` : `public, ${IMMUTABLE}`;
+/** Every reader-facing response is `private`: a shared cache must never answer a request that has no session (#354). */
+function cachePolicy(ref: RepoRefSpec): string {
+  return ref.kind === "commit" ? `private, ${READER_COMMIT}` : `private, ${BRANCH}`;
 }
 
 /** The snapshot a ref serves. A pointer to a missing snapshot is a broken store (503), never "not found".
@@ -222,11 +222,11 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   const repoCommentConfig = {
     repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL, documentPath: selected,
   };
-  // Private frames load their images through tickets, which only the trusted shell may renew.
+  // Every frame loads its images through tickets, which only the trusted shell may renew (#354).
   const html = renderScopedDocumentShell({
     namespace: request.name, title: `${request.owner}/${request.name}`,
     basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, repoCommentConfig,
-    privateViewerBase: grant.repo.private ? pinned : undefined, monitoring: true,
+    privateViewerBase: pinned, monitoring: true,
   });
   // Revalidated on every navigation (each response has its own nonce), but never no-store: back/forward cache stays usable.
   // The shell points at same-origin speculation rules so Chromium prefetches the frames the sidebar links to (#245).
@@ -243,7 +243,7 @@ async function tree(c: Context, grant: RepoGrant, request: RepoRequestPath, mani
   const sidebar = await services.snapshots.sidebar(grant, manifest);
   const result = sidebar ? treePage(sidebar, isPage(manifest), directory, page) : null;
   return c.json({ children: result?.children ?? [], cursor: result?.more ? String(page + 1) : null }, 200, {
-    "Cache-Control": cachePolicy(grant, request.ref),
+    "Cache-Control": cachePolicy(request.ref),
     ETag: `"tree-${manifest.commit}-r${manifest.rendererVersion}"`,
   });
 }
@@ -281,30 +281,27 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
   const base = repoBase(request.owner, request.name, request.ref);
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
   // Version-3 renders already carry document-relative URLs (#242); only older
-  // snapshots need the rewrite. A private body is split where its images take
-  // the reader's ticket (#293). The variant key keeps the derived forms apart in
+  // snapshots need the rewrite. The body is split where its images take
+  // the reader's ticket (#293, #354: public frames too). The variant key keeps the derived forms apart in
   // memory. The body depends only on the render key (which names the page's
   // directory), so it is derived once per isolate.
   const legacy = needsRelativeRewrite(manifest.rendererVersion);
-  const variant = `${grant.repo.private ? "private-" : ""}${legacy ? "legacy-" : ""}frame-v${FRAME_VERSION}`;
+  const variant = `${legacy ? "legacy-" : ""}ticketed-frame-v${FRAME_VERSION}`;
   const page = file.render === undefined ? { title: null, parts: [failureBody(file.error ?? "missing")] }
     : await services.snapshots.page(grant, file, variant, async rendered => {
       if (!("html" in rendered)) return { title: null, parts: [failureBody(rendered.error)] };
       const html = legacy ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html;
-      return { title: rendered.title, parts: grant.repo.private ? await ticketImageSlots(html, path) : [html] };
+      return { title: rendered.title, parts: await ticketImageSlots(html, path) };
     });
-  // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
+  // Every reader's frame embeds their own ticket; the shell decides what the widget may do.
   const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);
   let head = viewerScript("navigation", { prefix: `${base}/files/`, documentPath: path }, c.req.url);
-  let prefix = "";
-  if (grant.repo.private) {
-    // Requests from the opaque frame carry no cookies, so its images carry an asset ticket. Nothing else does: with
-    // no <base>, a link opened or copied from the frame is always the cookie-authorized URL (#293).
-    const issuedAt = services.authorize.now();
-    prefix = `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/`;
-    const ticket = { issuedAt, renewAfter: TICKET_TTL_SECONDS * 1000 / 2 };
-    head = viewerScript("frame", { base: pinned, prefix, manifestKey: manifest.commit, ticket }, c.req.url) + head;
-  }
+  // Requests from the opaque frame carry no cookies, so its images carry an asset ticket. Nothing else does: with
+  // no <base>, a link opened or copied from the frame is always the cookie-authorized URL (#293).
+  const issuedAt = services.authorize.now();
+  const prefix = `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/`;
+  const ticket = { issuedAt, renewAfter: TICKET_TTL_SECONDS * 1000 / 2 };
+  head = viewerScript("frame", { base: pinned, prefix, manifestKey: manifest.commit, ticket }, c.req.url) + head;
   const title = page.title ?? path.slice(path.lastIndexOf("/") + 1);
   const bytes = new TextEncoder().encode(renderFrameDocument({ title, body: page.parts.join(prefix), origin, head: `${head}\n${widget}` }));
   return serveObject({
@@ -312,11 +309,9 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": frameContentSecurityPolicy(origin),
-      "Cache-Control": cachePolicy(grant, request.ref),
+      "Cache-Control": cachePolicy(request.ref),
     },
-    // A public frame is fixed by its URL and render key; a private one embeds a per-reader ticket and has no validator.
-    // Generated documents are never ranged.
-    etag: grant.repo.private ? undefined : `"page-${file.render ?? `${file.sha}-${file.error}`}-${FRAME_TEMPLATE_TAG}"`,
+    // A frame embeds a per-reader ticket and has no validator. Generated documents are never ranged.
     transform: stream => stream,
     open: () => Promise.resolve(new Blob([bytes]).stream()),
     missing,
@@ -331,7 +326,7 @@ async function asset(c: Context, { grant, request, file, path, services, ticket,
     // Bytes from a repository never run as a document, even when navigated to (SVG).
     "Content-Security-Policy": "default-src 'none'; sandbox; frame-ancestors 'self'",
     // A ticket URL changes with every renewal: a cached copy is worth no more than the ticket's own lifetime.
-    "Cache-Control": ticket ? `private, max-age=${TICKET_TTL_SECONDS}` : cachePolicy(grant, request.ref),
+    "Cache-Control": ticket ? `private, max-age=${TICKET_TTL_SECONDS}` : cachePolicy(request.ref),
   };
   return serveObject({
     request: c.req.raw, headers, etag: `"git-${file.sha}"`, size: file.size,
@@ -345,26 +340,14 @@ async function asset(c: Context, { grant, request, file, path, services, ticket,
 
 async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest: SnapshotManifest, services: Services): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
-  // Only a cookie-authorized reader of a private repository renews, and only for this commit.
-  if (!grant.repo.private || grant.viewer === null || c.req.query("manifestKey") !== manifest.commit) return notFound(c, "json");
+  // Only a cookie-authorized reader renews, and only for this commit.
+  if (grant.viewer === null || c.req.query("manifestKey") !== manifest.commit) return notFound(c, "json");
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
   return c.json({ prefix: `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/` });
 }
 
 /** A repository page the shell may ask the first comments of: a canonical repository path, as Convex accepts it. */
 const MAX_SNAPSHOT_PATH_LENGTH = 1_024;
-
-/**
- * The signed-in reader a request's comment access is for (#259, #303). A private grant is its reader's own. For a public
- * repository it is whoever the session names: the reader the first comment page is read for (so it says which threads
- * are theirs to archive or delete), and the one whose moderation role is asked. A reader the session cannot name now
- * (anonymous, or the session check unavailable) is anonymous, as before; a check that fails outright rejects.
- */
-async function commentReader(request: Request, grant: RepoGrant, services: Services): Promise<string | null> {
-  if (grant.repo.private) return grant.viewer;
-  const viewer = await services.authorize.identity(request);
-  return viewer.kind === "user" ? viewer.id : null;
-}
 
 /**
  * Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. The shell's
@@ -383,7 +366,8 @@ async function commentAccessResponse(c: Context, grant: RepoGrant, services: Ser
   const path = c.req.query("path");
   const wanted = path !== undefined && path.length <= MAX_SNAPSHOT_PATH_LENGTH && isCanonicalStorageKey(path) ? path : null;
   const now = services.authorize.now();
-  const reader = commentReader(c.req.raw, grant, services);
+  // Every grant names its signed-in reader (#354): the one whose own threads carry their actions and whose moderation role is asked.
+  const reader = Promise.resolve(grant.viewer);
   const decision = reader.then(viewer => moderatorDecision(services.moderation, grant, viewer, now)).catch(() => null);
   const [access, decided, threads] = await Promise.all([
     commentAccess(services.comments, grant, now),
@@ -400,8 +384,8 @@ async function commentAccessResponse(c: Context, grant: RepoGrant, services: Ser
 }
 
 function setAuthorizationCookies(c: Context, authorization: Authorization): void {
-  // Cookie changes ride on denials and private responses only: a public response may be cached by anyone.
-  if (authorization.kind === "denied" || (authorization.kind === "granted" && authorization.grant.repo.private)) {
+  // Nothing the reader path answers is shared-cacheable (#354), so cookie changes ride on every response.
+  if (authorization.kind !== "unavailable") {
     for (const cookie of authorization.cookies) c.header("Set-Cookie", cookie, { append: true });
   }
 }
@@ -476,6 +460,14 @@ app.get("/r/*", async (c) => {
     : authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name));
   setAuthorizationCookies(c, authorization);
   if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, kind);
+  if (authorization.kind === "anonymous") {
+    // Every view needs a signed-in reader (#354). A navigation signs in and comes back; everything else is the plain 404.
+    // The answer is the same for any repository, so nothing about one leaks.
+    if (kind !== "html") return notFound(c, kind);
+    const url = new URL(c.req.url);
+    c.header("Cache-Control", "private, no-store");
+    return c.redirect(`/sign-in?returnTo=${encodeURIComponent(url.pathname + url.search)}`, 302);
+  }
   if (authorization.kind === "denied") return notFound(c, kind);
   record.granted = true;
   const { grant } = authorization;
@@ -562,7 +554,7 @@ app.post("/r/*", async (c) => {
   const authorization = await authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name, COMMENT_GRANT_MIN_MS);
   setAuthorizationCookies(c, authorization);
   if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, "json");
-  if (authorization.kind === "denied") return notFound(c, "json");
+  if (authorization.kind === "denied" || authorization.kind === "anonymous") return notFound(c, "json");
   return commentAccessResponse(c, authorization.grant, configured);
 });
 

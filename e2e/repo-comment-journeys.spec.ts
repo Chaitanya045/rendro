@@ -20,7 +20,7 @@ test.afterEach(({ cspViolations }) => {
 const toast = (page: Page, role: "status" | "alert") => ui(page).locator(`.toast[role="${role}"]`);
 const count = (page: Page) => ui(page).locator(".content-head .count");
 
-test("a deleted comment can be undone within its window and is then removed for good", async ({ actor, secondContext }) => {
+test("a deleted comment can be undone within its window and is then removed for good", async ({ actor, seeded }) => {
   test.setTimeout(180_000);
   const { comments } = repos();
   const doc = await journeyDoc("undo");
@@ -32,7 +32,8 @@ test("a deleted comment can be undone within its window and is then removed for 
   const token = await sessionToken(author.page);
   await createThread(token, scope, "Gone soon", await anchorOn(author.page, "quick brown"));
   const staysId = await createThread(token, scope, "Stays", await anchorOn(author.page, "second paragraph"));
-  const reader = await secondContext.newPage();
+  // Every read needs a signed-in reader (#354): the other reader is the seeded outsider, who may read public repositories.
+  const reader = await seeded("outsider");
   await open(reader, comments, doc.path, doc.commit);
   const me = ui(author.page), they = ui(reader);
   await expect(pin(author.page, "Gone soon")).toBeVisible();
@@ -215,7 +216,7 @@ test("older threads and replies load on demand, and a comment arriving while scr
   await expect(card(author.page, "Late arrival")).toBeVisible();
 });
 
-test("an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them", async ({ actor, secondContext }) => {
+test("an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them", async ({ actor, seeded }) => {
   test.setTimeout(180_000);
   const { comments } = repos();
   const doc = await journeyDoc("edit");
@@ -228,7 +229,7 @@ test("an author edits their thread and reply in place, another reader's page fol
   const threadId = await createThread(token, scope, "Frist take", await anchorOn(author.page, "quick brown"));
   const theirReply = await addReply(otherToken, scope, threadId, "Their reply");
   await open(other.page, comments, doc.path, doc.commit);
-  const anonymous = await secondContext.newPage();
+  const anonymous = await seeded("outsider");
   await open(anonymous, comments, doc.path, doc.commit);
   // A reply posted after both readers opened reaches them only through their live subscriptions (the first comments
   // came with the page): once they show it, every later change does too.
@@ -282,7 +283,7 @@ test("an author edits their thread and reply in place, another reader's page fol
   await expect.poll(async () => (await server()).replies.find(reply => reply._id === myReply)?.body).toBe("My reply, corrected");
   await expect(card(other.page, "Their reply").locator(".reply", { hasText: "My reply, corrected" }).getByTestId("commentor-edited")).toBeVisible();
 
-  // Another signed-in reader may edit only their own reply; an anonymous reader nothing.
+  // Another signed-in reader may edit only their own reply; a reader who is not signed in cannot reach the page at all (#354), and the seeded outsider, who wrote nothing, may edit nothing.
   const theirs = card(other.page, "Their reply");
   await expect(theirs.getByTestId("commentor-edit-btn")).toHaveCount(0);
   await expect(theirs.getByTestId("commentor-edit-reply-btn")).toHaveCount(1);
