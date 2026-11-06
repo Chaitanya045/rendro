@@ -311,18 +311,24 @@ describe("document frames", () => {
     expect(check.mock.calls.map(([src]) => src)).toEqual([signed, forged, "/img/logo.png"]);
   });
 
-  it("splits a private body only where a repository image takes the ticket prefix", () => {
+  it("splits a private body only where a repository image takes the ticket prefix", async () => {
     const html = '<p><a href="guide/b.md">b</a> <a href="#top">top</a> <img src="img/a b.png?x#y" alt="a"> <img src="../up.png" alt="up">'
       + ' <img src="/img/sig/proxied" alt="proxied"> <img src="https://example.com/x.png" alt="x"> <img src=" HTTPS://example.com/y.png" alt="y">'
       + ' <img src="\\host\\z.png" alt="z"> <img alt="none"> <a href="img/c.png">c</a></p>';
-    const parts = ticketImageSlots(html, "docs/guide/a.md");
+    const parts = await ticketImageSlots(html, "docs/guide/a.md");
     expect(parts.join("/r/o/n/@c/view/T/files/")).toBe('<p><a href="guide/b.md">b</a> <a href="#top">top</a> <img src="/r/o/n/@c/view/T/files/docs/guide/img/a%20b.png?x#y" alt="a">'
       + ' <img src="/r/o/n/@c/view/T/files/docs/up.png" alt="up"> <img src="/img/sig/proxied" alt="proxied"> <img src="https://example.com/x.png" alt="x">'
       + ' <img src=" HTTPS://example.com/y.png" alt="y"> <img src="\\host\\z.png" alt="z"> <img alt="none"> <a href="img/c.png">c</a></p>');
     expect(parts).toHaveLength(3);
     // A document's own NULs never become slots: the parser drops or replaces every one.
-    expect(ticketImageSlots('<p title="a\u0000b">x\u0000y<img src="i\u0000.png" alt="\u0000"></p>', "a.md")).toHaveLength(2);
-    expect(ticketImageSlots("<p>No images</p>", "a.md")).toEqual(["<p>No images</p>"]);
+    expect(await ticketImageSlots('<p title="a\u0000b">x\u0000y<img src="i\u0000.png" alt="\u0000"></p>', "a.md")).toHaveLength(2);
+    expect(await ticketImageSlots("<p>No images</p>", "a.md")).toEqual(["<p>No images</p>"]);
+  });
+
+  it("loads parse5 on first use, never at module load, so the serving Worker's cold start skips it (#357)", () => {
+    const source = readFileSync("src/repo-read/frame.ts", "utf8");
+    expect(source).not.toMatch(/^import (?!type\b)[^;]*from "parse5"/m);
+    expect(source).toMatch(/import\("parse5"\)/);
   });
 
   it("ships the ingest highlight palette byte for byte in the frame stylesheet", () => {

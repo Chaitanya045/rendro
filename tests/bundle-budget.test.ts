@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { budgetPath, checkBudget, measure, runBundleBudget, servedBundles, tolerance, type BundleBudget } from "../scripts/bundle-budget";
+import { budgetPath, checkBudget, measure, runBundleBudget, servedBundles, tolerance, type BundleBudget, type WorkerBundler } from "../scripts/bundle-budget";
 import { versionedBundles } from "../src/routes/versioned-bundles";
+import { workerBudgetKey, workerEntries } from "../scripts/worker-bundle";
 
 const fixtures: string[] = [];
 afterEach(() => { for (const directory of fixtures.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -23,8 +24,13 @@ function fixture(): string {
 }
 
 const size = (raw: number, brotli: number) => ({ raw, brotli });
-// The fixture serves the versioned bundles, one stylesheet, one font subset and the WASM.
-const served = Object.keys(versionedBundles).length + 3;
+// The fixture serves the versioned bundles, one stylesheet, one font subset and the WASM, plus the serving Worker's bundle.
+const served = Object.keys(versionedBundles).length + 4;
+
+/** Stands in for esbuild: each Worker is a fixed program with the given packages inside. */
+function bundler(code: Record<string, string> = {}, packages: Record<string, string[]> = {}): WorkerBundler {
+  return (_root, entry) => Promise.resolve({ code: new TextEncoder().encode(code[entry] ?? `console.log(${JSON.stringify(entry)});\n`), packages: packages[entry] ?? [] });
+}
 
 describe("bundle budget check", () => {
   it("passes sizes at the budget and growth within the tolerance", () => {
@@ -104,46 +110,73 @@ describe("served bundles", () => {
 });
 
 describe("bundle budget CLI", () => {
-  it("records, verifies, rejects growth until it is recorded, and hints after a shrink", () => {
+  it("records, verifies, rejects growth until it is recorded, and hints after a shrink", async () => {
     const root = fixture();
     const log = vi.fn();
-    expect(runBundleBudget(root, [], log)).toBe(1);
+    expect(await runBundleBudget(root, [], log, bundler())).toBe(1);
     expect(log).toHaveBeenLastCalledWith(expect.stringContaining("public/lazy-tree.js has no budget entry"));
 
-    expect(runBundleBudget(root, ["--record"], log)).toBe(0);
+    expect(await runBundleBudget(root, ["--record"], log, bundler())).toBe(0);
     expect(log).toHaveBeenLastCalledWith(`Recorded the budget of ${served} bundles in scripts/bundle-budget.json.`);
     const recorded = readFileSync(join(root, budgetPath), "utf8");
     expect(recorded.endsWith("}\n")).toBe(true);
     const keys = Object.keys(JSON.parse(recorded) as BundleBudget);
     expect(keys).toEqual([...keys].sort());
-    expect(runBundleBudget(root, [], log)).toBe(0);
+    expect(await runBundleBudget(root, [], log, bundler())).toBe(0);
     expect(log).toHaveBeenLastCalledWith(`Bundle budget verified (${served} bundles, 1% tolerance).`);
 
     writeFileSync(join(root, "public/lazy-tree.js"), "console.log('a much larger lazy tree than before');\n".repeat(20));
-    expect(runBundleBudget(root, [], log)).toBe(1);
+    expect(await runBundleBudget(root, [], log, bundler())).toBe(1);
     expect(log).toHaveBeenLastCalledWith(expect.stringMatching(/^public\/lazy-tree\.js grew beyond its budget: Brotli \d+ B → \d+ B \(\+\d+ B, \+[\d.]+%\)\. If the weight is intended, run pnpm record:budget/));
 
-    expect(runBundleBudget(root, ["--record"], log)).toBe(0);
+    expect(await runBundleBudget(root, ["--record"], log, bundler())).toBe(0);
     writeFileSync(join(root, "public/lazy-tree.js"), "1\n");
-    expect(runBundleBudget(root, [], log)).toBe(0);
+    expect(await runBundleBudget(root, [], log, bundler())).toBe(0);
     expect(log).toHaveBeenLastCalledWith(expect.stringMatching(/^public\/lazy-tree\.js shrank: Brotli .*\nBundle budget verified/s));
   });
 
-  it("reports grown bundles together with the shrink hints", () => {
+  it("reports grown bundles together with the shrink hints", async () => {
     const root = fixture();
     const log = vi.fn();
-    runBundleBudget(root, ["--record"], log);
+    await runBundleBudget(root, ["--record"], log, bundler());
     writeFileSync(join(root, "public/rum.js"), "x".repeat(4_000));
     writeFileSync(join(root, "public/lazy-tree.js"), "1\n");
-    expect(runBundleBudget(root, [], log)).toBe(1);
+    expect(await runBundleBudget(root, [], log, bundler())).toBe(1);
     expect(log).toHaveBeenLastCalledWith(expect.stringMatching(/^public\/rum\.js grew beyond its budget.*\npublic\/lazy-tree\.js shrank/s));
   });
 
-  it("asks for a build when a bundle is missing, without writing a budget", () => {
+  it("budgets the serving Worker's bundle: growth fails until it is recorded, and only that Worker has an entry", async () => {
+    const root = fixture();
+    const log = vi.fn();
+    expect(await runBundleBudget(root, ["--record"], log, bundler())).toBe(0);
+    const recorded = JSON.parse(readFileSync(join(root, budgetPath), "utf8")) as BundleBudget;
+    expect(Object.keys(recorded).filter(key => key.startsWith("worker:"))).toEqual([workerBudgetKey]);
+    expect(recorded[workerBudgetKey]).toEqual(measure(new TextEncoder().encode('console.log("src/worker.ts");\n')));
+
+    const bigger = bundler({ "src/worker.ts": "console.log('a much larger serving Worker than before');\n".repeat(50) });
+    expect(await runBundleBudget(root, [], log, bigger)).toBe(1);
+    expect(log).toHaveBeenLastCalledWith(expect.stringMatching(/^worker:src\/worker\.ts grew beyond its budget: Brotli \d+ B → \d+ B/));
+    // A larger control or ingest Worker is not budgeted here.
+    expect(await runBundleBudget(root, [], log, bundler({ "src/repo-access/entry.ts": "x".repeat(5_000) }))).toBe(0);
+  });
+
+  it.each(workerEntries)("fails when %s bundles zod, whatever its size, and refuses to record it", async (entry) => {
+    const root = fixture();
+    const log = vi.fn();
+    const withZod = bundler({}, { [entry]: ["hono", "zod"] });
+    expect(await runBundleBudget(root, ["--record"], log, withZod)).toBe(1);
+    expect(log).toHaveBeenLastCalledWith(expect.stringContaining(`${entry} bundles zod: its schema builder and locales were about half of the serving Worker`));
+    expect(() => readFileSync(join(root, budgetPath))).toThrow();
+    await runBundleBudget(root, ["--record"], log, bundler());
+    expect(await runBundleBudget(root, [], log, withZod)).toBe(1);
+    expect(log).toHaveBeenLastCalledWith(expect.stringContaining(`${entry} bundles zod`));
+  });
+
+  it("asks for a build when a bundle is missing, without writing a budget", async () => {
     const root = fixture();
     rmSync(join(root, "public/commentor.js"));
     const log = vi.fn();
-    expect(runBundleBudget(root, ["--record"], log)).toBe(1);
+    expect(await runBundleBudget(root, ["--record"], log, bundler())).toBe(1);
     expect(log).toHaveBeenLastCalledWith("public/commentor.js is missing. Run pnpm build:assets first.");
     expect(() => readFileSync(join(root, budgetPath))).toThrow();
   });

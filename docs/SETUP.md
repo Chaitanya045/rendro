@@ -215,7 +215,7 @@ rendro/
 ├── src/
 │   ├── index.ts, worker.ts   # Local Node server; serving Worker entry (env bridging, asset allowlist)
 │   ├── app-routes.ts         # Route mounting shared by both entries
-│   ├── config.ts, logger.ts  # Zod env validation; Pino logger with redaction
+│   ├── config.ts, logger.ts  # Hand-written env validation (env-schema.ts, no zod); Pino logger with redaction
 │   ├── auth-proxy.ts         # /api/auth proxy to Convex, sign-out
 │   ├── middleware/           # Security headers, session, write and body admission
 │   ├── routes/               # Landing, auth and account pages, the repository shell, 404s, assets

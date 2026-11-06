@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
 import { versionedBundles } from "../src/routes/versioned-bundles";
+import { bundleWorker, forbiddenInBundle, workerBudgetKey, workerEntries, type WorkerBundle } from "./worker-bundle";
 
 export const budgetPath = "scripts/bundle-budget.json";
 /** Growth up to this fraction of the recorded size passes (toolchain noise); anything more must be recorded. */
@@ -70,8 +71,13 @@ export function checkBudget(budget: BundleBudget, sizes: BundleBudget): BudgetRe
   return { failures, hints };
 }
 
+/** Bundles one Worker entry point; replaceable so a test need not build the real Workers. */
+export type WorkerBundler = (root: string, entry: string) => Promise<WorkerBundle>;
+
 /** CLI behaviour: check the built bundles against the budget, or with --record rewrite it. */
-export function runBundleBudget(root: string, args: string[], log: (message: string) => void = console.log): number {
+export async function runBundleBudget(
+  root: string, args: string[], log: (message: string) => void = console.log, bundler: WorkerBundler = bundleWorker,
+): Promise<number> {
   const sizes: BundleBudget = {};
   const missing: string[] = [];
   for (const [name, file] of servedBundles(root)) {
@@ -81,6 +87,17 @@ export function runBundleBudget(root: string, args: string[], log: (message: str
   }
   if (missing.length) {
     log(missing.join("\n"));
+    return 1;
+  }
+  // The Workers' own code (#357): the serving Worker's size is budgeted; no Worker may bundle a forbidden package.
+  const forbidden: string[] = [];
+  for (const entry of workerEntries) {
+    const bundle = await bundler(root, entry);
+    forbidden.push(...forbiddenInBundle(entry, bundle.packages));
+    if (entry === "src/worker.ts") sizes[workerBudgetKey] = measure(bundle.code);
+  }
+  if (forbidden.length) {
+    log(forbidden.join("\n"));
     return 1;
   }
   const file = join(root, budgetPath);
