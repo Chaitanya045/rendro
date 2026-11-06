@@ -52,7 +52,7 @@
     "brotli": 99904
   },
   "worker:src/worker.ts": {
-    "raw": 516488,
-    "brotli": 128936
+    "raw": 480847,
+    "brotli": 123711
   }
 }
