@@ -291,7 +291,7 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
     : await services.snapshots.page(grant, file, variant, async rendered => {
       if (!("html" in rendered)) return { title: null, parts: [failureBody(rendered.error)] };
       const html = legacy ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html;
-      return { title: rendered.title, parts: grant.repo.private ? ticketImageSlots(html, path) : [html] };
+      return { title: rendered.title, parts: grant.repo.private ? await ticketImageSlots(html, path) : [html] };
     });
   // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
   const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);

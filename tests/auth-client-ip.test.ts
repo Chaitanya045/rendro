@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AUTH_CLIENT_IP_HEADER, signAuthClientIp, verifiedAuthRequest } from "../shared/auth-client-ip";
+import { AUTH_CLIENT_IP_HEADER, isIpAddress, signAuthClientIp, verifiedAuthRequest } from "../shared/auth-client-ip";
 import { registerAuthClientIp } from "../src/auth-client-ip";
 import { proxyAuthRequest, proxyAuthSignOut } from "../src/auth-proxy";
 import { CONVEX_INTERNAL_SECRET } from "../src/config";
@@ -50,6 +50,33 @@ describe("trusted auth client IP forwarding", () => {
 
   it.each([undefined, "garbage", "192.0.2.1, 192.0.2.2"])("does not sign an invalid ingress value (%s)", async (ip) => {
     expect(Array.from(await signAuthClientIp(new Request(url), ip, secret))).toEqual([]);
+  });
+
+  // The accepted set is the one zod's ipv4() and ipv6() defined before #357 dropped zod from the Worker bundle.
+  it.each([
+    "0.0.0.0", "1.2.3.4", "192.0.2.1", "255.255.255.255",
+    "::", "::1", "1::", "2001:db8::42", "2001:DB8::42", "1:2:3:4:5:6:7:8", "0:0:0:0:0:0:0:0", "fe80::", "::ffff:1.2.3.4", "1:2:3:4:5:6:1.2.3.4", "a:b:c:d:e:f:1:2",
+  ])("accepts the address %j", (ip) => {
+    expect(isIpAddress(ip)).toBe(true);
+  });
+
+  it.each([
+    "", " ", "abc", "256.1.1.1", "01.2.3.4", "1.2.3", "1.2.3.4.5", "1.2.3.4 ", " 1.2.3.4", "1.2.3.4\n", "1.2.3.4:80", "1.2.3.4/32", "1.2.3.4, 1.2.3.5", "１.２.３.４",
+    "::g", "1:::2", "1::2::3", "12345::", "1:2:3:4:5:6:7:8:9", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "::ffff:999.2.3.4", "::ffff:1.2.3.4.5", "::0x1",
+    "[::1]", "::1\n", " ::1", "::1 ", "\t::1", "fe80::1%eth0", "::/0", "::@1\\", "::1@1.2.3.4", "1:2:3:4:5:6:7:1.2.3.4",
+  ])("rejects %j", (ip) => {
+    expect(isIpAddress(ip)).toBe(false);
+  });
+
+  it("signs a verified address only when it is a bare IP, so a forged header with an authority trick is never trusted", async () => {
+    const request = new Request(url);
+    const headers = await signAuthClientIp(request, "192.0.2.1", secret);
+    for (const forged of ["::@1\\", "[::1]", "::1\n"]) {
+      const tampered = new Request(url, { headers: new Headers(headers) });
+      tampered.headers.set("x-rendro-client-ip", forged);
+      expect((await verifiedAuthRequest(tampered, secret)).headers.get(AUTH_CLIENT_IP_HEADER)).toBeNull();
+    }
+    expect(Array.from(await signAuthClientIp(request, "::@1\\", secret))).toEqual([]);
   });
 
   it("overwrites spoofed forwarding headers with registered ingress metadata in the proxy", async () => {

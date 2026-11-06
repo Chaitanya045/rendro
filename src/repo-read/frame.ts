@@ -9,7 +9,7 @@
  * resources (external images arrive through the signed image proxy). The widget
  * never connects anywhere: it talks to the trusted shell (#254).
  */
-import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
+import type { DefaultTreeAdapterMap } from "parse5";
 import { IMAGE_PROXY_PREFIX } from "@/image-proxy";
 import { escapeHtml } from "@/routes/html";
 import { styleManifest } from "@/routes/style-manifest";
@@ -20,6 +20,12 @@ import { encodeRepoPath } from "./paths";
 /** Bump when the frame markup changes: it is part of every frame validator. */
 export const FRAME_VERSION = 2;
 export const FRAME_TEMPLATE_TAG = `f${FRAME_VERSION}.v${PRIVATE_VIEWER_VERSION}.c${COMMENTOR_VERSION}.${styleManifest["repo-doc"].split(".")[1]}`;
+
+/**
+ * parse5 and its entity tables are about 150 KB of the serving Worker (#357), and only pre-v3 renders and private
+ * repositories need them, so they load on first use rather than in every new isolate (a loaded module stays cached).
+ */
+const loadParse5 = () => import("parse5");
 
 type Node = DefaultTreeAdapterMap["childNode"] | DefaultTreeAdapterMap["documentFragment"];
 
@@ -72,6 +78,7 @@ export function relativeUrl(value: string, documentPath: string): string | null 
  * still resolves as part of the repository.
  */
 export async function frameBody(html: string, documentPath: string, isProxied: (src: string) => Promise<boolean>): Promise<string> {
+  const { parseFragment, serialize } = await loadParse5();
   const fragment = parseFragment(html);
   const elements: Array<Extract<Node, { attrs: unknown }>> = [];
   const collect = (node: Node) => {
@@ -117,7 +124,8 @@ function repositoryImagePath(src: string, documentPath: string): string | null {
  * depends only on the render, so it is derived once per isolate; joining it
  * with each request's ticket is a string concatenation.
  */
-export function ticketImageSlots(html: string, documentPath: string): string[] {
+export async function ticketImageSlots(html: string, documentPath: string): Promise<string[]> {
+  const { parseFragment, serialize } = await loadParse5();
   const fragment = parseFragment(html);
   const visit = (node: Node) => {
     if ("attrs" in node && node.nodeName === "img") {

@@ -42,5 +42,9 @@
   "src/ingest/comrak-engine/comrak_engine_bg.wasm": {
     "raw": 368424,
     "brotli": 99904
+  },
+  "worker:src/worker.ts": {
+    "raw": 516488,
+    "brotli": 128936
   }
 }

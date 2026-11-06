@@ -26,8 +26,8 @@ export interface DynamicReader {
 export const dynamicReaders: DynamicReader[] = [
   // Copies every string binding into process.env; the names are the other reads.
   { file: "src/worker.ts", names: [] },
-  // Validates process.env against envSchema: its keys are the reads.
-  { file: "src/config.ts", names: [/^\s*([A-Z][A-Z0-9_]*): z\./gm] },
+  // Validates process.env by hand (#357): the keys passed to its readers, and CONVEX_SITE_URL's direct read, are the reads.
+  { file: "src/config.ts", names: [/\b(?:oneOf|text|secret)\(\s*("[A-Z][A-Z0-9_]*")/g, /\braw\.([A-Z][A-Z0-9_]*)/g] },
   { file: "src/repo-read/admission.ts", names: [/\brateLimiter\(\s*[\w.]+\s*,\s*("[A-Z][A-Z0-9_]*")/g] },
   { file: "src/rum/route.ts", names: [/\bbinding\(\s*[\w.]+\s*,\s*("[A-Z][A-Z0-9_]*")/g] },
   { file: "convex/auth.ts", names: [/\boptionEnv\(\s*("[A-Z][A-Z0-9_]*")\s*\)/g, /for \(const \w+ of \[([^\]]*)\]\)\s*\{\s*if \(!process\.env\[/g] },

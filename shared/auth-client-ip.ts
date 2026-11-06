@@ -1,13 +1,29 @@
-import { z } from "zod/v4";
-
 // Only this verified header is trusted by Better Auth. Never trust raw forwarding
 // headers at the public Convex origin: callers can supply them themselves.
 export const AUTH_CLIENT_IP_HEADER = "x-rendro-verified-client-ip";
 const IP_HEADER = "x-rendro-client-ip";
 const TIME_HEADER = "x-rendro-client-ip-time";
 const SIGNATURE_HEADER = "x-rendro-client-ip-signature";
-const ipSchema = z.union([z.ipv4(), z.ipv6()]);
+const IPV4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
+// Only hex digits, colons and dots can make an address; the URL parser would otherwise re-read `@` or `\` as an authority.
+const IPV6_ALPHABET = /^[0-9a-fA-F:.]+$/;
 const encoder = new TextEncoder();
+
+/**
+ * A dotted-quad IPv4 or a textual IPv6 address, nothing else (no port, zone, brackets, whitespace or list). Written by hand
+ * rather than with zod (#357), which this module (shared with Convex, and bundled into the serving Worker) otherwise needs;
+ * the accepted set is the one zod's `ipv4()` and `ipv6()` define. It needs no `node:net`, which Convex does not provide.
+ */
+export function isIpAddress(value: string): boolean {
+  if (IPV4.test(value)) return true;
+  if (!IPV6_ALPHABET.test(value)) return false;
+  try {
+    new URL(`http://[${value}]`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function payload(request: Request, ip: string, timestamp: string): Uint8Array<ArrayBuffer> {
   const url = new URL(request.url);
@@ -30,7 +46,7 @@ export async function signAuthClientIp(
   now = Date.now(),
 ): Promise<Headers> {
   const headers = new Headers();
-  if (!ip || !ipSchema.safeParse(ip).success || secret.length < 32) return headers;
+  if (!ip || !isIpAddress(ip) || secret.length < 32) return headers;
   const timestamp = String(now);
   const signature = await crypto.subtle.sign("HMAC", await key(secret), payload(request, ip, timestamp));
   headers.set(IP_HEADER, ip);
@@ -50,7 +66,7 @@ export async function verifiedAuthRequest(
   const signature = headers.get(SIGNATURE_HEADER);
   for (const name of [AUTH_CLIENT_IP_HEADER, IP_HEADER, TIME_HEADER, SIGNATURE_HEADER]) headers.delete(name);
   if (
-    secret && secret.length >= 32 && ip && ipSchema.safeParse(ip).success
+    secret && secret.length >= 32 && ip && isIpAddress(ip)
     && timestamp && /^\d+$/.test(timestamp) && Math.abs(now - Number(timestamp)) <= 60_000
     && signature && /^[a-f0-9]{64}$/.test(signature)
   ) {
