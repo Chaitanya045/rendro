@@ -81,6 +81,7 @@ const RUM = "TECHNICAL.md#post-rum";
 const CONVEX = "TECHNICAL.md#environment-variables-convex";
 const GITHUB_SIGN_IN = "TECHNICAL.md#github-sign-in-p1";
 const APP_TOKENS = "TECHNICAL.md#installation-tokens";
+const PUBLIC_READ = "TECHNICAL.md#public-repositories-without-an-installation-354";
 
 const serving: WorkerDeployable = {
   title: "Serving Worker",
@@ -137,6 +138,7 @@ const ingest: WorkerDeployable = {
     { kind: "secret", name: "REPO_CONTENT_KEY_PREVIOUS", need: "optional", purpose: "The previous content key, during a key rotation only", doc: "TECHNICAL.md#key-rotation" },
     { kind: "var", name: "GITHUB_APP_ID", need: "required", purpose: "The GitHub App's ID: the issuer of its JWT, for installation tokens and redelivery", doc: APP_TOKENS },
     { kind: "secret", name: "GITHUB_APP_PRIVATE_KEY", need: "required", purpose: "The GitHub App's private key (PEM); signs the app JWT", doc: APP_TOKENS },
+    { kind: "secret", name: "GITHUB_PUBLIC_READ_TOKEN", need: "optional", purpose: "Rendro's public-read-only token (no scopes): reads public repositories the App is not installed on; without it they are read unauthenticated (60 requests an hour per address)", doc: PUBLIC_READ },
     { kind: "secret", name: "GITHUB_DEV_TOKEN", need: "forbidden", purpose: "A static installation token for development and tests, where the App is not configured", doc: INGEST },
     { kind: "var", name: "GITHUB_API_ORIGIN", need: "forbidden", purpose: "Points the client at a fake GitHub (tests)", doc: INGEST },
     { kind: "var", name: "GITHUB_ARCHIVE_ORIGINS", need: "forbidden", purpose: "Archive redirect origins of a fake GitHub (tests)", doc: INGEST },
@@ -172,6 +174,7 @@ const control: WorkerDeployable = {
     { kind: "var", name: "CONVEX_URL", need: "required", purpose: "The Convex deployment the comment sink calls", doc: CONTROL },
     { kind: "var", name: "GITHUB_APP_ID", need: "required", purpose: "The GitHub App's ID: the issuer of its JWT, for installation tokens", doc: APP_TOKENS },
     { kind: "secret", name: "GITHUB_APP_PRIVATE_KEY", need: "required", purpose: "The GitHub App's private key (PEM); installation tokens are minted with it", doc: APP_TOKENS },
+    { kind: "secret", name: "GITHUB_PUBLIC_READ_TOKEN", need: "optional", purpose: "Rendro's public-read-only token (no scopes): the fallback when GitHub refuses a reader's user token for a public repository without an installation; equals the ingest Worker's value", doc: PUBLIC_READ },
     { kind: "secret", name: "GITHUB_DEV_TOKEN", need: "forbidden", purpose: "A static installation token for development and tests, where the App is not configured", doc: CONTROL },
     { kind: "var", name: "GITHUB_API_ORIGIN", need: "forbidden", purpose: "Points the client at a fake GitHub (tests)", doc: CONTROL },
     { kind: "var", name: "GITHUB_WEB_ORIGIN", need: "forbidden", purpose: "Points token refresh at a fake GitHub (tests)", doc: CONTROL },

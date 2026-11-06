@@ -76,6 +76,23 @@ describe("control Worker", () => {
     expect(await source.authorize("user-1", "octo", "docs")).toBeNull();
   });
 
+  it("opens a public repository the App is not installed on for any signed-in reader, through the public-read token (#354)", async () => {
+    const { env, github } = environment({ GITHUB_PUBLIC_READ_TOKEN: undefined });
+    globalThis.fetch = github.fetch;
+    const lib = github.repo("lib-org", "docs", { id: 901 });
+    const source = serviceRepoPermissions({ fetch: (request) => RepoAccessService.fetch(request, env) });
+    // Without the token, and with GitHub refusing nothing to say, the repository is not found.
+    expect(await source.authorize("stranger", "lib-org", "docs")).toBeNull();
+    const configured = environment({ GITHUB_PUBLIC_READ_TOKEN: github.publicReadToken });
+    const configuredSource = serviceRepoPermissions({ fetch: (request) => RepoAccessService.fetch(request, configured.env) });
+    expect(await configuredSource.authorize("stranger", "lib-org", "docs")).toEqual({ id: 901, owner: "lib-org", name: "docs", private: false, defaultBranch: "main" });
+    // A malformed token is no token.
+    const malformed = environment({ GITHUB_PUBLIC_READ_TOKEN: "not a token!" });
+    const malformedSource = serviceRepoPermissions({ fetch: (request) => RepoAccessService.fetch(request, malformed.env) });
+    expect(await malformedSource.authorize("stranger", "lib-org", "docs")).toBeNull();
+    expect(lib.isPrivate).toBe(false);
+  });
+
   it("answers who may moderate a repository's comments over the service binding, from the same mirror (#259)", async () => {
     const { env, github } = environment();
     globalThis.fetch = github.fetch;

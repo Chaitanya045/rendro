@@ -461,7 +461,7 @@ app.get("/r/*", async (c) => {
     ? authorizeTicket(configured.authorize, target.ticket, request.owner, request.name, (request.ref as { commit: string }).commit)
     : authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name));
   setAuthorizationCookies(c, authorization);
-  if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, kind);
+  if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter, ...authorization.status ? { status: authorization.status } : {} }, kind);
   if (authorization.kind === "anonymous") {
     // Every view needs a signed-in reader (#354). A navigation signs in and comes back; everything else is the plain 404.
     // The answer is the same for any repository, so nothing about one leaks.
@@ -555,7 +555,7 @@ app.post("/r/*", async (c) => {
   // A grant must outlive the shell's renewal halfway through it, so access never lapses between renewals.
   const authorization = await authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name, COMMENT_GRANT_MIN_MS);
   setAuthorizationCookies(c, authorization);
-  if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, "json");
+  if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter, ...authorization.status ? { status: authorization.status } : {} }, "json");
   if (authorization.kind === "denied" || authorization.kind === "anonymous") return notFound(c, "json");
   return commentAccessResponse(c, authorization.grant, configured);
 });

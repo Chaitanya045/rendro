@@ -4,6 +4,8 @@
  *
  * - `POST /v1/authorize`: `repoAccessHandler` over the access directory (the
  *   read path's permission source).
+ * - A signed-in reader may open any public repository (#354), whether or not the App is installed on it: the directory
+ *   resolves it with the reader's user token and, when GitHub refuses that, `GITHUB_PUBLIC_READ_TOKEN`.
  * - `POST /v1/moderation`: the role that lets a reader moderate a repository's
  *   comments (#259), from the same mirror.
  * - `POST /v1/accounts/link` and `/unlink`: where GitHub sign-in hands over a
@@ -22,6 +24,7 @@
  */
 import { isDeliveryId, readVerifiedWebhook } from "@/ingest/github/webhook";
 import { appJwtSigner, gitHubAppCredentials, mintedInstallationTokens } from "@/ingest/github/app-auth";
+import { publicReadTokens } from "@/ingest/github/public-token";
 import { staticTokenProvider } from "@/ingest/github/token";
 import type { DurableObjectNamespaceLike } from "@/ingest/orchestrator/coordinator-client";
 import { isOwnerLogin } from "@/ingest/orchestrator/messages";
@@ -52,6 +55,12 @@ export interface ControlWorkerEnv {
   GITHUB_APP_PRIVATE_KEY?: string;
   /** Development and tests only: a static installation token where the App is not configured. */
   GITHUB_DEV_TOKEN?: string;
+  /**
+   * Rendro's own public-read-only token (#354): the fallback for resolving and confirming a public repository the App is not
+   * installed on, when GitHub refuses a reader's user token. Optional; without it such repositories depend on GitHub letting
+   * user tokens read them.
+   */
+  GITHUB_PUBLIC_READ_TOKEN?: string;
   /** Comments on repository docs (#254): Convex, told about every epoch and removed repository. Optional. */
   CONVEX_URL?: string;
   CONVEX_INTERNAL_SECRET?: string;
@@ -201,6 +210,7 @@ export class RepoAccessDirectory {
         // Without both, comment grants end with their own lifetime (at most five minutes) instead of with the epoch.
         comments: env.CONVEX_URL && validSecret(env.CONVEX_INTERNAL_SECRET) ? convexCommentSink(env.CONVEX_URL, env.CONVEX_INTERNAL_SECRET) : undefined,
         content: env.REPO_INGEST ? coordinatorContentPurge(env.REPO_INGEST) : undefined,
+        publicRead: publicReadTokens(env.GITHUB_PUBLIC_READ_TOKEN),
       })
       : null;
   }
