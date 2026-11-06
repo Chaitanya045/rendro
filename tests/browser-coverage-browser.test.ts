@@ -140,6 +140,12 @@ it("rejects unmapped first-party scripts", async () => {
     .rejects.toThrow("Missing browser script source");
 });
 
+it("does not map the shell's string controller, served as /shell.js", async () => {
+  const shell = { functions: [], source: "window.shell = true" };
+  expect(await convertBrowserCoverage([{ scriptId: "1", url: `${harness.origin}/shell.js?v=1`, ...shell }], process.cwd(), new Set([probe]))).toEqual({});
+  await expect(convertBrowserCoverage([{ scriptId: "2", url: `${harness.origin}/nested/shell.js`, ...shell }])).rejects.toThrow("Unmapped browser script");
+});
+
 it("does not map a publisher's own script under a deployment's files", async () => {
   const publisher = { functions: [], source: "window.publisher = true" };
   expect(await convertBrowserCoverage([{ scriptId: "1", url: `${harness.origin}/p/site/files/assets/module.js`, ...publisher }], process.cwd(), new Set([probe]))).toEqual({});

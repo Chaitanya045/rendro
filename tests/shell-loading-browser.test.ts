@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { securityHeaders } from "@/middleware/security-headers";
 import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION, SHELL_VERSION } from "@/viewer/asset-versions";
-import { bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
+import { buildBrowserBundle, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 import { serveFonts } from "./helpers/fonts";
 import { repoShell, shellAsset } from "./helpers/repo-shell";
 import { serveStyles } from "./helpers/styles";
@@ -26,7 +26,8 @@ beforeAll(async () => {
   });`;
   const assets = new Map([
     ["/lazy-tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")],
-    ["/commentor-parent.js", stub],
+    // Built like a real bundle (with its map), so browser coverage can account for it.
+    ["/commentor-parent.js", (await buildBrowserBundle({ stdin: { contents: stub, resolveDir: process.cwd(), loader: "js" }, write: false })).outputFiles![0].text],
     shellAsset,
   ]);
   const app = new Hono();
