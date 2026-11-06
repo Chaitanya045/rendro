@@ -10890,9 +10890,9 @@
         },
         {
           "id": "UI-161-E14",
-          "from": "Anonymous reader of a public repository",
+          "from": "Signed-in reader of a public repository, holding a capability cookie or frame ticket",
           "trigger": "The repository is made private on GitHub (repository webhook)",
-          "expected": "Plain 404 once the serving isolate's one-minute public-repository memory lapses; readers GitHub still lists keep reading with a capability cookie",
+          "expected": "Plain 404 once the repository's visibility epoch reaches the reader's colo: the cookie and the ticket issued before it are stale; readers GitHub still lists are decided afresh and keep reading",
           "inventoryRefs": [
             "UI-161"
           ],
@@ -10900,7 +10900,7 @@
           "tests": [
             {
               "file": "tests/repo-access-revocation.test.ts",
-              "name": "ends a signed-in stranger's read of a repository made private within its cookie's lifetime, sooner once the background refresh has run (#354)",
+              "name": "ends a signed-in stranger's read of a repository made private as soon as the visibility epoch arrives, cookie and ticket alike (#354)",
               "kind": "unit"
             },
             {
