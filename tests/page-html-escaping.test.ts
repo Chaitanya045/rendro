@@ -14,7 +14,11 @@ import { repoShell } from "./helpers/repo-shell";
  * script reads it back as data. A hostile value never adds an element, an attribute or a script.
  */
 const hostile = "</script><script>alert(1)</script><!--\"'&\u2028\u2029 <b x=\"1\">";
-const window = new Window();
+const window = new Window({
+  // The shell preloads its first tree page (#359): give the document an origin and answer every fetch offline.
+  url: "https://rendro.test/",
+  settings: { fetch: { interceptor: { beforeAsyncRequest: ({ window }) => Promise.resolve(new window.Response(null, { status: 204 })) } } },
+});
 afterAll(() => window.happyDOM.close());
 
 const parse = (html: string) => new window.DOMParser().parseFromString(html, "text/html");
