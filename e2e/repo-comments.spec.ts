@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { test, expect } from "./fixtures";
 import {
-  anchorOn, card, collaborator, comment, commit, convexCallWith, convexSocket, createThread, journeyDoc, open, openDrawer, pin, publicThreads, repoIds, repos,
-  select, sessionToken, ui, unique,
+  anchorOn, card, collaborator, comment, commit, convexCallWith, convexSocket, createThread, journeyDoc, open, openDrawer, pin, commentThreads, repoIds, repos,
+  sessionToken, ui, unique,
 } from "./comment-helpers";
 import { desktop, signInSeeded } from "./shell-helpers";
 import { commentDocs } from "./repo-fixtures";
@@ -34,7 +34,8 @@ test("a reader creates, replies to and resolves a comment on a repository doc", 
   await bubble.getByTestId("commentor-reply-send").click();
   await expect(bubble).toContainText("Agreed, pinned.");
   await bubble.getByTestId("commentor-resolve-btn").click();
-  await expect.poll(async () => (await publicThreads("docs/guide.md")).find(thread => thread.body === body))
+  const token = await sessionToken(page);
+  await expect.poll(async () => (await commentThreads(token, "docs/guide.md")).find(thread => thread.body === body))
     .toMatchObject({ resolved: true, replies: [{ body: "Agreed, pinned." }] });
 });
 
@@ -103,31 +104,33 @@ test("a reader who loses repository access loses its comments at once", async ({
   }
 });
 
-test("an anonymous reader of a public repository sees its comments but cannot post", async ({ page, secondContext, seed, baseURL }) => {
-  const { comments } = repos();
-  const head = await commit({ "docs/guide.md": commentDocs()["docs/guide.md"] });
+test("a public repository has no comments: no widget, no configuration, no access, and Convex refuses it too (#353)", async ({ page, seed, baseURL }) => {
+  const { commentsPublic } = repos();
+  const base = `/r/${commentsPublic.owner}/${commentsPublic.name}`;
   await signInSeeded(page.context(), baseURL, seed, "owner");
-  await open(page, comments, "docs/guide.md", head);
-  const body = unique("Visible to all");
-  await comment(page, "Call the API", body);
-
-  const anonymous = await secondContext.newPage();
-  await open(anonymous, comments, "docs/guide.md", head);
-  await expect(pin(anonymous, body)).toBeVisible();
-  await expect(ui(anonymous).getByTestId("commentor-comment-btn")).toBeDisabled();
-  await select(anonymous, "before anything else");
-  // Two frames later the chip would have opened for a reader who may write.
-  await ui(anonymous).locator("article").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await expect(ui(anonymous).getByTestId("commentor-selection-action")).toHaveAttribute("data-state", "closed");
-  // Convex refuses an anonymous write outright.
-  const forged = await convexCallWith(undefined, "mutation", "repoComments:createThread", {
-    repoId: 9004, path: "docs/guide.md", body: "Drive-by",
-    anchor: { kind: "repo-text", blobSha: "a".repeat(40), headingSlug: "usage", prefix: "", exact: "Call", suffix: "", offset: 0 },
-  });
-  expect(forged).toMatchObject({ ok: false, code: "unauthenticated" });
+  const response = await page.goto(`${base}?doc=docs%2Fguide.md`);
+  expect(response?.status()).toBe(200);
+  await expect(ui(page).locator("article")).toBeVisible();
+  // The shell carries no comment configuration or script, and the frame no widget.
+  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).RENDRO_REPO_COMMENT_CONFIG)).toBeUndefined();
+  expect(await page.locator('script[src^="/commentor-parent.js"]').count()).toBe(0);
+  expect(await ui(page).locator('script[src*="commentor.js"], script[data-commentor-config]').count()).toBe(0);
+  await expect(ui(page).getByTestId("commentor-dock")).toHaveCount(0);
+  // The access route is the read path's plain 404 for anyone, signed in or not, and Convex has no grant to read.
+  const access = await page.request.post(`${base}/comment-access?path=docs%2Fguide.md`, { headers: { Origin: baseURL! } });
+  expect(access.status()).toBe(404);
+  const token = await sessionToken(page);
+  const scope = { repoId: repoIds.commentsPublic, path: "docs/guide.md" };
+  for (const caller of [token, undefined]) {
+    expect(await convexCallWith(caller, "query", "repoComments:listThreads", { ...scope, paginationOpts: { numItems: 20, cursor: null } }))
+      .toMatchObject({ ok: true, value: { page: [] } });
+    expect(await convexCallWith(caller, "mutation", "repoComments:createThread", {
+      ...scope, body: "Drive-by", anchor: { kind: "repo-text", blobSha: "a".repeat(40), headingSlug: "usage", prefix: "", exact: "Call", suffix: "", offset: 0 },
+    })).toMatchObject({ ok: false, code: "not_found" });
+  }
 });
 
-test("the first comments carry the signed-in author's Archive and Delete before the live page, and nobody else's", async ({ page, secondContext, seed, baseURL }) => {
+test("the first comments carry the signed-in author's Archive and Delete before the live page, and nobody else's", async ({ page, seed, baseURL }) => {
   test.setTimeout(120_000);
   const { comments, commentsPrivate } = repos();
   // Idempotent start: the owner is a collaborator of the private repository (a retry of another spec may have removed them).
@@ -160,14 +163,7 @@ test("the first comments carry the signed-in author's Archive and Delete before 
   await expect(card(author, body).getByTestId("commentor-delete-btn")).toBeVisible();
   await author.close();
 
-  // An anonymous reader of the same public page sees the thread with neither.
-  const anonymous = await secondContext.newPage();
-  await firstPaint(anonymous, comments, doc.path, doc.commit);
-  await expect(card(anonymous, body)).toBeVisible();
-  await expect(card(anonymous, body).getByTestId("commentor-archive-btn")).toHaveCount(0);
-  await expect(card(anonymous, body).getByTestId("commentor-delete-btn")).toHaveCount(0);
-
-  // A private repository's first page was already its reader's, and still is.
+  // A second private repository's first page is its reader's too.
   await open(page, commentsPrivate, "docs/private.md");
   const secret = unique("Private and mine");
   await comment(page, "Only collaborators", secret);

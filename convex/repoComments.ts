@@ -21,7 +21,7 @@ import { publicError } from "./publicErrors";
 import { mutation, query } from "./publicFunctions";
 import { publicPaginate } from "./publicPagination";
 import {
-  isRepoCommentModerator, liveRepoCommentModerator, recordRepoAudit, repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter, validUserId,
+  isRepoCommentModerator, liveRepoCommentModerator, recordRepoAudit, repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter,
 } from "./repoCommentAccess";
 import { repoAnchorValidator } from "./schema";
 import { requireInternalSecret } from "./security";
@@ -69,7 +69,7 @@ function emptyPage() {
   return { page: [], isDone: true, continueCursor: "" };
 }
 
-/** Names only: comments on public repositories are visible to anyone, so no email address ever leaves Convex. */
+/** Names only: every reader of a repository sees every author, so no email address ever leaves Convex. */
 function authorDisplay(author: { name?: string | null } | null) {
   return { authorEmail: "", authorName: (author?.name ?? "").trim().slice(0, MAX_AUTHOR_NAME_LENGTH) || "Former reader" };
 }
@@ -108,10 +108,10 @@ function edit(row: { editedAt?: number; editOperationId?: string }) {
 }
 
 /**
- * A reply as `userId` (null: anonymous) sees it: only its author may edit it, and its author or a moderator of the
+ * A reply as `userId` sees it: only its author may edit it, and its author or a moderator of the
  * repository (#259) may delete it. `moderator` is only what the page shows; the mutation decides again.
  */
-async function replyRow(reply: Doc<"repoReplies">, userId: string | null, moderator: boolean, author: ReturnType<typeof authors>) {
+async function replyRow(reply: Doc<"repoReplies">, userId: string, moderator: boolean, author: ReturnType<typeof authors>) {
   const own = reply.authorId === userId;
   return {
     _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body, ...edit(reply),
@@ -120,10 +120,10 @@ async function replyRow(reply: Doc<"repoReplies">, userId: string | null, modera
 }
 
 /**
- * One page of a document's live threads, newest first, each with its newest replies, as `userId` (null: anonymous)
+ * One page of a document's live threads, newest first, each with its newest replies, as `userId`
  * sees it. A moderator (#259) is offered Archive and Delete on everyone's comments, as its author is on its own.
  */
-async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: string | null, moderator: boolean, paginationOpts: PageOptions) {
+async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: string, moderator: boolean, paginationOpts: PageOptions) {
   const threads = await publicPaginate(ctx.db.query("repoThreads")
     .withIndex("by_repo_path", q => q.eq("repoId", repoId).eq("path", path).eq("deletedAt", undefined))
     .order("desc"), { ...paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
@@ -152,7 +152,7 @@ export const listThreads = query({
     if (!validPageSize(args.paginationOpts.numItems, REPO_THREAD_PAGE_SIZE)) publicError("invalid_input");
     const reader = await repoCommentReader(ctx, args.repoId);
     if (!reader || !validRepoPath(args.path)) return emptyPage();
-    const userId = reader.user?._id ?? null;
+    const userId = reader.user._id;
     return threadPage(ctx, args.repoId, args.path, userId, await isRepoCommentModerator(ctx, args.repoId, userId), args.paginationOpts);
   },
 });
@@ -163,10 +163,8 @@ export const listThreads = query({
  * the repository, alongside recording the grant, and hands the page only to that reader (`private, no-store`). The
  * page is the one `listThreads` gives the same reader; what `grant` would refuse is an empty page here too.
  *
- * `userId` is whom the grant names (null: anyone, for a public repository) and decides access, exactly as `grant`
- * does. A public page is the same for every reader except which threads and replies the reader may delete or edit, so the
- * Worker names its signed-in reader as `viewerId` (#303), and the page is read for them. A private page is always
- * read for the grant's own reader.
+ * `userId` is whom the grant names and decides access, exactly as `grant` does (a null user is refused, as comments
+ * exist on private repositories only, #353); the page is read for that reader alone.
  *
  * `moderator` (#259) is the control Worker's word, relayed by the Worker, that the page's reader moderates this
  * repository. The grant may not exist yet (it is recorded in parallel), so the page is told rather than asking for the
@@ -174,18 +172,13 @@ export const listThreads = query({
  */
 export const threadSnapshot = query({
   args: {
-    internalSecret: v.string(), ...scopeArgs, userId: v.union(v.string(), v.null()), epoch: v.number(), viewerId: v.optional(v.string()),
-    moderator: v.optional(v.boolean()),
+    internalSecret: v.string(), ...scopeArgs, userId: v.string(), epoch: v.number(), moderator: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     requireInternalSecret(args.internalSecret);
-    const reader = args.userId ?? args.viewerId ?? null;
-    if (!validRepoPath(args.path) || (args.viewerId !== undefined && (args.userId !== null || !validUserId(args.viewerId)))
-      || (args.moderator === true && reader === null)) {
-      publicError("invalid_input");
-    }
+    if (!validRepoPath(args.path)) publicError("invalid_input");
     if (!await repoCommentSnapshotAllowed(ctx, args.repoId, args.userId, args.epoch)) return emptyPage();
-    return threadPage(ctx, args.repoId, args.path, reader, args.moderator === true, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
+    return threadPage(ctx, args.repoId, args.path, args.userId, args.moderator === true, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
   },
 });
 
@@ -200,7 +193,7 @@ export const listReplies = query({
       .withIndex("by_thread", q => q.eq("threadId", thread._id).eq("deletedAt", undefined))
       .order("desc"), { ...args.paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
     const author = authors(ctx);
-    const userId = reader.user?._id ?? null;
+    const userId = reader.user._id;
     const moderator = await isRepoCommentModerator(ctx, args.repoId, userId);
     const page = await Promise.all(replies.page.map(reply => replyRow(reply, userId, moderator, author)));
     return { ...replies, page };

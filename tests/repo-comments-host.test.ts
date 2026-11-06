@@ -9,7 +9,7 @@ import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESP
 
 /*
  * The trusted shell's half of comments on repository docs (#254): the scope comes from the frame's URL and the
- * shell's own repository, anonymous readers may read but never write, the read path's comment access is renewed
+ * shell's own repository, the read path's comment access is renewed
  * halfway through each grant, and the one Convex client lives here.
  */
 const clients = vi.hoisted(() => [] as Array<{ url: string; setAuth: ReturnType<typeof vi.fn>; onUpdate: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }>);
@@ -84,17 +84,17 @@ describe("the repository comment host", () => {
     return { host, subscribe, mutate, request, responses, readies, updates, live, load };
   }
 
-  it("lets an anonymous reader read, and never write or keep drafts", () => {
+  it("answers no request of a shell with no signed-in reader: no read, no write, no draft (#353)", () => {
     const { subscribe, mutate, request, responses, readies } = setup(null);
     expect(readies()).toEqual([expect.objectContaining({ userId: null, canWrite: false })]);
     request("sub", "subscribe", { documentPath: "docs/guide.md" });
     request("more", "threads.more");
     request("create", "thread.create", { body: "Hi", anchor });
     request("draft", "draft.save", { key: "create", draft: { body: "Hi", anchor } });
-    expect(subscribe).toHaveBeenCalledWith({ repoId: 9001, documentPath: "docs/guide.md" }, expect.any(Function), expect.any(Function));
+    expect(subscribe).not.toHaveBeenCalled();
     expect(responses()).toEqual([
-      expect.objectContaining({ requestId: "sub", ok: true }),
-      expect.objectContaining({ requestId: "more", ok: true }),
+      expect.objectContaining({ requestId: "sub", ok: false, error: "Comment scope is unavailable" }),
+      expect.objectContaining({ requestId: "more", ok: false, error: "Comment scope is unavailable" }),
       expect.objectContaining({ requestId: "create", ok: false, error: "Comment scope is unavailable" }),
       expect.objectContaining({ requestId: "draft", ok: false, error: "Comment scope is unavailable" }),
     ]);
@@ -226,7 +226,7 @@ describe("the first comments before the live subscription (#284)", () => {
     expect(other.updates()).toEqual([]);
     expect(other.subscribe).toHaveBeenCalledTimes(1);
 
-    const none = setup(null);
+    const none = setup("user-a");
     none.host.holdLive();
     subscribeNow(none.request);
     none.host.accessAnswered(null);
@@ -535,15 +535,15 @@ describe("booting the repository shell's comments", () => {
   }
   beforeEach(page);
 
-  it("reads anonymously without authenticating the client, and asks the read path for access", async () => {
-    const fetcher = server([null]);
+  it("authenticates the client for the signed-in reader, and asks the read path for access", async () => {
+    const fetcher = server(["user-a"]);
     const signedOut = vi.fn();
     window.addEventListener("commentor-sign-out", signedOut);
     const dispose = bootCommentorParentHost()!;
     await vi.waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === config.accessUrl)).toBe(true));
     expect(clients).toHaveLength(1);
     expect(clients[0].url).toBe(config.convexUrl);
-    expect(clients[0].setAuth).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(clients[0].setAuth).toHaveBeenCalled());
     window.dispatchEvent(new Event("focus"));
     await Promise.resolve();
     expect(signedOut).not.toHaveBeenCalled();
@@ -551,8 +551,22 @@ describe("booting the repository shell's comments", () => {
     window.removeEventListener("commentor-sign-out", signedOut);
   });
 
-  it("hands the host whichever frame is the content frame, also one adopted while the session was checked", async () => {
+  it("is signed out, and starts no host, when there is no session to read comments with (#353)", async () => {
     server([null]);
+    const signedOut = vi.fn();
+    window.addEventListener("commentor-sign-out", signedOut);
+    const start = vi.spyOn(CommentorParentHost.prototype, "start");
+    const dispose = bootCommentorParentHost()!;
+    await vi.waitFor(() => expect(signedOut).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(start).not.toHaveBeenCalled();
+    expect(clients[0].setAuth).not.toHaveBeenCalled();
+    dispose();
+    window.removeEventListener("commentor-sign-out", signedOut);
+  });
+
+  it("hands the host whichever frame is the content frame, also one adopted while the session was checked", async () => {
+    server(["user-a"]);
     let started: unknown[] = [];
     vi.spyOn(CommentorParentHost.prototype, "start").mockImplementation(function (this: CommentorParentHost, loaded?: boolean) {
       started = [(this as unknown as { frame: unknown }).frame, loaded];
@@ -594,7 +608,7 @@ describe("booting the repository shell's comments", () => {
     await vi.waitFor(() => expect(accessUrls).toEqual([`${config.accessUrl}?path=docs%2Fguide.md`]));
     // Answered before the host existed: the host gets it as it is created.
     await Promise.resolve();
-    session(new Response("null"));
+    session(new Response(JSON.stringify({ user: { id: "user-a" } })));
     await vi.waitFor(() => expect(answered).toHaveBeenCalledWith({ documentPath: "docs/guide.md", threads: [], canLoadMore: false }));
     expect(writable).toHaveBeenCalledWith(true);
     expect(held).not.toHaveBeenCalled();
@@ -607,7 +621,7 @@ describe("booting the repository shell's comments", () => {
     let access!: (response: Response) => void;
     const accessUrls: string[] = [];
     vi.stubGlobal("fetch", vi.fn((url: string) => {
-      if (String(url).includes("get-session")) return Promise.resolve(new Response("null"));
+      if (String(url).includes("get-session")) return Promise.resolve(new Response(JSON.stringify({ user: { id: "user-a" } })));
       accessUrls.push(String(url));
       return new Promise<Response>(done => { access = done; });
     }));

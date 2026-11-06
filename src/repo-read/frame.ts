@@ -17,8 +17,8 @@ import { COMMENTOR_VERSION, PRIVATE_VIEWER_VERSION } from "@/viewer/asset-versio
 import { COMMENTOR_SCRIPT_PATH, COMMENTOR_STYLE_SOURCE } from "./comments";
 import { encodeRepoPath } from "./paths";
 
-/** Bump when the frame markup changes: it is part of every frame validator. */
-export const FRAME_VERSION = 2;
+/** Bump when the frame markup changes: it is part of every frame validator. 3: public frames lost the comments widget (#353). */
+export const FRAME_VERSION = 3;
 export const FRAME_TEMPLATE_TAG = `f${FRAME_VERSION}.v${PRIVATE_VIEWER_VERSION}.c${COMMENTOR_VERSION}.${styleManifest["repo-doc"].split(".")[1]}`;
 
 type Node = DefaultTreeAdapterMap["childNode"] | DefaultTreeAdapterMap["documentFragment"];
@@ -136,12 +136,13 @@ export function failureBody(reason: string): string {
   return `<p class="rendro-render-failure">${escapeHtml(REASONS[reason] ?? "This page could not be rendered safely.")}</p>`;
 }
 
-export function frameContentSecurityPolicy(origin: string): string {
+/** `comments`: a private repository's frame also allows the comment widget's script and stylesheet; a public one has none (#353). */
+export function frameContentSecurityPolicy(origin: string, comments: boolean): string {
   return [
     "sandbox allow-scripts allow-popups",
     "default-src 'none'",
-    `script-src ${origin}/private-viewer.js ${origin}${COMMENTOR_SCRIPT_PATH}`,
-    `style-src ${origin}/styles/ ${COMMENTOR_STYLE_SOURCE}`,
+    `script-src ${origin}/private-viewer.js${comments ? ` ${origin}${COMMENTOR_SCRIPT_PATH}` : ""}`,
+    `style-src ${origin}/styles/${comments ? ` ${COMMENTOR_STYLE_SOURCE}` : ""}`,
     // Same-origin only: since #224 ingest writes every external image as a signed /img/ proxy path or drops it,
     // so an external URL reaching a frame is a bug, and the policy keeps it from the reader.
     `img-src ${origin}`,

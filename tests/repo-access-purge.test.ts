@@ -37,7 +37,7 @@ async function retry(world: World) {
 
 /**
  * The control Worker's directory over the fake GitHub, telling a real (convex-test) Convex about
- * removals, purges and restores. Both share the fixture's clock. One public repository has a
+ * removals, purges and restores. Both share the fixture's clock. One repository has a
  * thread with a reply.
  */
 async function convexWorld() {
@@ -57,7 +57,7 @@ async function convexWorld() {
   const world = fixture = accessFixture({ comments: sink, installationTokens: mintedInstallationTokens });
   await world.setup();
   const repoId = world.open.id;
-  await at(() => backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId, userId: null, epoch: 0, expiresAt: world.clock.time + 60_000 }));
+  await at(() => backend.mutation(api.repoCommentAccess.grant, { internalSecret, repoId, userId: "user-commenter", epoch: 0, expiresAt: world.clock.time + 60_000 }));
   await backend.run(async ctx => {
     const anchor = { kind: "repo-text" as const, blobSha: BLOB, headingSlug: "install", prefix: "Run ", exact: "pnpm install", suffix: " first", offset: 4 };
     const threadId = await ctx.db.insert("repoThreads", {

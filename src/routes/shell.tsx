@@ -59,7 +59,8 @@ export function ShellDocument(options: ScopedDocumentShellOptions) {
   const org = options.namespace;
   const nonce = requestNonce();
   const bootstrap = `window.RENDRO_INITIAL_DOC=${scriptJson(`${org}/${options.selectedPath}`)};window.RENDRO_ORG=${scriptJson(org)};`
-    + `window.RENDRO_DOCUMENT_BASE=${scriptJson(options.basePath)};window.RENDRO_REPO_COMMENT_CONFIG=${scriptJson(options.repoCommentConfig)};`;
+    + `window.RENDRO_DOCUMENT_BASE=${scriptJson(options.basePath)};`
+    + (options.repoCommentConfig ? `window.RENDRO_REPO_COMMENT_CONFIG=${scriptJson(options.repoCommentConfig)};` : "");
   return (
     <html lang="en">
       <head>
@@ -124,7 +125,7 @@ export function ShellDocument(options: ScopedDocumentShellOptions) {
         <InlineScript code={shellScript} />
         <InlineScript code={bootstrap} />
         <CommentRecovery userId={null} />
-        {options.repoCommentConfig.convexUrl && <script nonce={nonce} src={`/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}`}></script>}
+        {options.repoCommentConfig?.convexUrl && <script nonce={nonce} src={`/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}`}></script>}
         <script nonce={nonce} src={`/lazy-tree.js?v=${LAZY_TREE_VERSION}`}></script>
         {options.privateViewerBase !== undefined && <ParentViewer base={options.privateViewerBase} />}
         {/* Real-user monitoring (#282): async, so it never holds up parsing or the first document. */}

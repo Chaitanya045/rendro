@@ -1,6 +1,6 @@
 # Rendro
 
-Rendro turns the Markdown in a GitHub repository into navigable documentation, with inline comments, for exactly the people who can read that repository. Nothing is uploaded and there is no separate permission model: a GitHub App's webhooks keep a rendered snapshot of each branch, and every page view follows the repository's own access.
+Rendro turns the Markdown in a GitHub repository into navigable documentation, with inline comments on private repositories, for exactly the people who can read that repository. Nothing is uploaded and there is no separate permission model: a GitHub App's webhooks keep a rendered snapshot of each branch, and every page view follows the repository's own access.
 
 > Status: the read path, ingest and permission mirror are built and tested; they are wired to production once the GitHub App exists. GitHub sign-in is built behind configuration (#338); until the App is registered, accounts use email and password.
 
@@ -9,7 +9,7 @@ Rendro turns the Markdown in a GitHub repository into navigable documentation, w
 1. **Ingest.** A push to a repository the App is installed on reaches the ingest Worker. It fetches the commit, renders the Markdown with comrak (cmark-gfm lineage), sanitizes the HTML, highlights code, and writes an immutable snapshot to R2 with a full-text index in D1. Private repositories are sealed per repository at rest.
 2. **Read.** `/r/{owner}/{repo}` serves the snapshot: a sidebar tree, search, and each page in a sandboxed frame. A signed capability cookie answers "may this reader see this repository" without calling GitHub or the database; a miss asks the control Worker, which mirrors GitHub's permissions.
 3. **Revoke.** Removing a collaborator or an installation reaches the control Worker by webhook. It bumps the reader's revocation epoch, so every outstanding cookie and asset ticket stops working.
-4. **Comment.** Select text and leave a threaded comment. Comments live in Convex, re-attach to their quote in later commits, and are readable and writable by exactly the people who can read the page.
+4. **Comment.** Select text and leave a threaded comment. Comments live in Convex, re-attach to their quote in later commits, and are readable and writable by exactly the people who can read the page. Public repositories get the docs only: **inline comments are for private repositories**.
 
 ## URLs
 
@@ -24,7 +24,7 @@ Rendro turns the Markdown in a GitHub repository into navigable documentation, w
 
 - **GitHub-backed access**: who can read the docs is who can read the repository
 - **Document tree and search**: lazy sidebar with folders, and full-text search per repository
-- **Inline comments**: anchored to text, real time through Convex, surviving later commits
+- **Inline comments** (private repositories only): anchored to text, real time through Convex, surviving later commits
 - **Fast reads**: a cached page view verifies one HMAC and reads one epoch; frames are immutable at commit URLs
 - **Private at rest**: per-repository AES-256-GCM sealing of private content, opened only after authorization
 - **Theme**: system, dark and light modes

@@ -38,14 +38,14 @@ async function world() {
     return [name, { userId: user._id as string, sessionId: session._id as string }] as const;
   }))));
   const as = (name: "author" | "moderator" | "writer") => backend.withIdentity({ subject: users[name].userId, sessionId: users[name].sessionId });
-  const grant = (repoId: number, userId: string | null, options: { epoch?: number; ttl?: number } = {}) => backend.mutation(api.repoCommentAccess.grant, {
+  const grant = (repoId: number, userId: string, options: { epoch?: number; ttl?: number } = {}) => backend.mutation(api.repoCommentAccess.grant, {
     internalSecret, repoId, userId, epoch: options.epoch ?? 0, expiresAt: Date.now() + (options.ttl ?? 60_000),
   });
   const moderate = (repoId: number, userId: string, options: { role?: "admin" | "maintain"; epoch?: number; ttl?: number } = {}) => backend.mutation(api.repoCommentAccess.grantModerator, {
     internalSecret, repoId, userId, role: options.role ?? "maintain", epoch: options.epoch ?? 0, expiresAt: Date.now() + (options.ttl ?? 60_000),
   });
-  // A public repository: every reader holds the open grant, and the moderator holds a role on top of it.
-  await grant(REPO, null);
+  // A private repository: every reader holds a grant of their own, and the moderator holds a role on top of it.
+  await Promise.all(Object.values(users).map(user => grant(REPO, user.userId)));
   const threadId = await as("author").mutation(api.repoComments.createThread, { ...scope(), body: "Secret opinion", anchor });
   const replyId = await as("author").mutation(api.repoComments.addReply, { ...scope(), threadId, body: "Another opinion" });
   const audits = () => backend.run(ctx => ctx.db.query("auditEvents").withIndex("by_resource", q => q.eq("resourceType", "repository").eq("resourceId", String(REPO))).collect());
@@ -70,7 +70,7 @@ describe("recording a moderator grant", () => {
     const before = Date.now();
     const answer = await moderate(REPO, users.moderator.userId, { ttl: 60 * 60_000 });
     expect(answer.granted && answer.expiresAt - before).toBeLessThanOrEqual(GRANT_MAX_MS + 50);
-    expect(await backend.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(2);
+    expect(await backend.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(4);
   });
 
   it("refuses a repository no read grant made known, a removed one, and a decision older than a revocation", async () => {
@@ -233,7 +233,7 @@ describe("what a moderator may do", () => {
     ];
     for (const attempt of attempts("writer")) await expect(attempt()).rejects.toThrow("Forbidden");
     // A role on another repository is nothing here.
-    await grant(OTHER_REPO, null);
+    await grant(OTHER_REPO, users.moderator.userId);
     await moderate(OTHER_REPO, users.moderator.userId);
     for (const attempt of attempts("moderator")) await expect(attempt()).rejects.toThrow("Forbidden");
     // Another reader's role is not the caller's.
@@ -283,20 +283,20 @@ describe("what a moderator may do", () => {
 
 describe("the first page for the Worker (#259)", () => {
   const snapshot = (backend: ReturnType<typeof convexTest>, args: Record<string, unknown>) => backend.query(api.repoComments.threadSnapshot, {
-    internalSecret, ...scope(), userId: null, epoch: 0, ...args,
+    internalSecret, ...scope(), epoch: 0, ...args,
   } as never);
 
-  it("shows a moderator everything it may delete, told so by the Worker before any grant exists, and refuses a claim with no reader", async () => {
+  it("shows a moderator everything it may delete, told so by the Worker before any grant exists, and refuses a page with no reader", async () => {
     const { backend, users } = await world();
-    const plain = await snapshot(backend, { viewerId: users.moderator.userId });
+    const plain = await snapshot(backend, { userId: users.moderator.userId });
     expect(plain.page[0]).toMatchObject({ canDelete: false });
-    const told = await snapshot(backend, { viewerId: users.moderator.userId, moderator: true });
+    const told = await snapshot(backend, { userId: users.moderator.userId, moderator: true });
     expect(told.page[0]).toMatchObject({ canDelete: true, canEdit: false, replies: [expect.objectContaining({ canDelete: true, canEdit: false })] });
-    // False is the same as absent; a private grant's reader is its own page's reader.
-    expect((await snapshot(backend, { viewerId: users.moderator.userId, moderator: false })).page[0]).toMatchObject({ canDelete: false });
+    // False is the same as absent; the grant's reader is the page's reader.
+    expect((await snapshot(backend, { userId: users.moderator.userId, moderator: false })).page[0]).toMatchObject({ canDelete: false });
     expect((await snapshot(backend, { userId: users.author.userId, moderator: true })).page[0]).toMatchObject({ canDelete: true, canEdit: true });
-    // No reader to be a moderator for: refused, never an anonymous page that deletes.
-    await expect(snapshot(backend, { moderator: true })).rejects.toThrow("Invalid input");
+    // No reader to be a moderator for: refused (#353), never an anonymous page that deletes.
+    await expect(snapshot(backend, { userId: null, moderator: true })).rejects.toThrow();
     await expect(snapshot(backend, { userId: "", moderator: true })).rejects.toThrow("Invalid input");
     // The page is a hint; the mutation still decides from the grant.
     await expect(backend.withIdentity({ subject: users.moderator.userId, sessionId: users.moderator.sessionId })

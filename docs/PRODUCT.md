@@ -9,17 +9,17 @@ What the product is, who it serves, and how they use it.
 
 ## What is Rendro?
 
-Rendro renders the docs in a GitHub repository as a navigable workspace with inline comments, for the people who can read that repository.
+Rendro renders the docs in a GitHub repository as a navigable workspace with inline comments on private repositories, for the people who can read that repository.
 
-Nothing is uploaded and nothing is published. Rendro finds the docs in the repository, renders its Markdown and HTML, and re-renders when the branch moves. Who may read a repository's docs, and comment on them, is exactly who may read the repository on GitHub.
+Nothing is uploaded and nothing is published. Rendro finds the docs in the repository, renders its Markdown and HTML, and re-renders when the branch moves. Who may read a repository's docs, and comment on them, is exactly who may read the repository on GitHub. Inline comments exist on private repositories only; a public repository gets the docs without the comment feature.
 
 ## The People
 
 | Who | What they do |
 |---|---|
 | **Maintainers** | Own the repository and the docs in it. Install the Rendro GitHub App on the repositories Rendro may read (P1). They write and review docs the way they already work: in Git, through pull requests |
-| **Readers** | Anyone GitHub lets read the repository: collaborators, organization members and teams for a private repository, everyone for a public one. They read, search and comment |
-| **Anonymous visitors** | Read the docs of a public repository without an account. They cannot comment |
+| **Readers** | Anyone GitHub lets read the repository: collaborators, organization members and teams for a private repository, everyone for a public one. They read and search, and on a private repository they comment |
+| **Anonymous visitors** | Read the docs of a public repository without an account. Public repositories have no comments |
 
 Rendro has no roles of its own. A reader's permission on GitHub is the whole permission model.
 
@@ -75,11 +75,10 @@ Select text on any page (or click an element with text) to open a thread.
 |---|---|---|---|---|
 | Private repository: someone GitHub lets read it | Yes | Yes | Yes | Their own |
 | Private repository: anyone else | No (the same 404 as a repository that does not exist) | No | No | No |
-| Public repository: signed-in reader | Yes | Yes | Yes | Their own |
-| Public repository: anonymous visitor | Yes | Yes | No | No |
+| Public repository: anyone | Yes | No comments | No comments | No comments |
 
 - Rendro mirrors GitHub's permissions and never asks GitHub on each view. When GitHub removes someone's access, their access to the docs and comments ends too, within minutes.
-- Comments on a public repository are public. Author names are shown, email addresses never.
+- Public repositories have no comments. If a private repository is made public its comments are hidden, not deleted, and come back if it is made private again. Author names are shown, email addresses never.
 - When a repository leaves the GitHub App, its docs and comments are hidden at once. They are deleted only after 30 days, once GitHub confirms the removal.
 - Private repository content is sealed per repository (AES-256-GCM) in storage and in the edge cache, and opened only after the reader is authorized.
 - Rendered content nobody reads for 30 days expires, and is rendered again on the next visit.

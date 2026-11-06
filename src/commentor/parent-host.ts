@@ -118,7 +118,7 @@ export class CommentorParentHost {
   private requestTokens = 20;
   private requestBudgetAt = performance.now();
   private mutationsInFlight = 0;
-  // Repository docs (#254): may this reader write, as the read path last said? Anyone may read a public repository.
+  // Repository docs (#254): may this reader write, as the read path last said? Every reader of a private repository is signed in (#353).
   private writable: boolean;
   // Repository docs (#284): until the first comment-access answer has recorded this reader's grant, a live
   // subscription would only see the empty page Convex gives a reader without one, so it waits.
@@ -424,13 +424,12 @@ export class CommentorParentHost {
     }
     if (!isCommentorParentRequest(event.data)) return;
     const scope = this.currentScope();
-    // Anyone may read a public repository's comments; every write (and draft) still needs the signed-in reader.
+    // Comments exist on private repositories only (#353): every request, read or write, needs the signed-in reader.
     const reading = event.data.method === "subscribe" || event.data.method === "threads.more" || event.data.method === "replies.more";
     // The shell has already sent this frame to another page (#284): a read from the page it is leaving is for a
     // document that is no longer current. It is dropped without an answer, so the leaving page shows no error.
     if (reading && this.loadedScope && !sameScope(scope, this.loadedScope)) return;
-    const anonymous = !this.userId && !reading;
-    if (anonymous || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
+    if (!this.userId || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
       if (event.source) this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
       return;
     }
@@ -695,7 +694,6 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   let writable: boolean | null = null;
   let firstAnswer: { snapshot: RepoCommentSnapshot | null } | null = null;
   let signedOut = false;
-  let signedIn = false;
   let frameLoaded = frameAlreadyLoaded;
   const rememberLoad = () => { frameLoaded = true; };
   frame.addEventListener("load", rememberLoad);
@@ -723,10 +721,8 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const session = denied ? null : await response.json() as { user?: { id?: unknown } } | null;
       const userId = typeof session?.user?.id === "string" && session.user.id ? session.user.id : null;
       if (!disposed && !signedOut) {
-        // Repository docs (#254) are readable without signing in when public: an anonymous reader stays one,
-        // while a reader who loses the session mid-visit has signed out.
-        if (!userId) { if (signedIn) signOut(); return null; }
-        signedIn = true;
+        // Repository comments (#254) are for signed-in readers (#353): no session, or one lost mid-visit, is signed out.
+        if (!userId) { signOut(); return null; }
         syncCommentRecoveryUser(window.sessionStorage, userId);
         host?.setUserId(userId);
       }
@@ -736,7 +732,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   };
   // BFCache and full reloads must check the live session before hydrating drafts.
   void checkIdentity().then((userId) => {
-    if (disposed || signedOut) return;
+    if (disposed || signedOut || !userId) return;
     // A preload may have become the content frame meanwhile (#245); it has loaded by then.
     const current = document.getElementById("content-frame");
     const adopted = current instanceof HTMLIFrameElement && current !== frame ? current : null;
@@ -747,8 +743,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     // The iframe may have loaded while checking the session.
     host.start(Boolean(adopted) || frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);
-    // Anonymous readers use the client unauthenticated.
-    if (userId) client.setAuth(async args => {
+    client.setAuth(async args => {
       // Convex refreshes before expiry (and after a rejection) with forceRefreshToken. A hidden tab
       // has nobody to serve: hold the refresh, and settle it the moment the tab is visible again.
       if (args?.forceRefreshToken) await whenVisible();

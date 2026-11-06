@@ -44,7 +44,7 @@ async function forgedWrites(token: string | undefined, scope: { repoId: number; 
   ];
 }
 
-test("an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write", async ({ page, secondContext, seeded, seed, baseURL }) => {
+test("an outsider is refused a private repository's comments, and a reader who is not the author may triage but not archive or delete", async ({ page, secondContext, seeded, seed, baseURL }) => {
   test.setTimeout(240_000);
   const { comments, commentsPrivate } = repos();
   // Idempotent start: the owner is a collaborator (a retry of another spec may have removed them).
@@ -82,44 +82,39 @@ test("an outsider is refused a private repository's comments, and anonymous read
   // Nothing was written by any of the refused callers.
   expect((await threadsAs(ownerToken, privateScope)).find(thread => thread._id === privateThread._id)).toMatchObject({ body: secret, resolved: false, archived: false, replies: [] });
 
-  // A public repository's comments are anyone's to read: the anonymous reader sees the thread and its reply, and is
-  // offered no way to write, resolve, archive or delete.
-  const doc = await journeyDoc("anonymous");
+  // A repository's readers see the thread and its reply; the one who is not the author is offered what a reader may do.
+  const doc = await journeyDoc("readers");
   const scope = { repoId: repoIds.comments, path: doc.path };
   await open(page, comments, doc.path, doc.commit);
-  await comment(page, "quick brown", "Visible to everyone");
-  await pin(page, "Visible to everyone").click();
+  await comment(page, "quick brown", "Visible to readers");
+  await pin(page, "Visible to readers").click();
   const bubble = ui(page).getByTestId("commentor-thread-bubble");
-  await bubble.getByTestId("commentor-reply-input").fill("A reply anyone reads");
+  await bubble.getByTestId("commentor-reply-input").fill("A reply readers read");
   await bubble.getByTestId("commentor-reply-send").click();
-  await expect(bubble.locator(".reply:not(.is-sending)")).toContainText("A reply anyone reads");
+  await expect(bubble.locator(".reply:not(.is-sending)")).toContainText("A reply readers read");
   const [thread] = await threadsAs(ownerToken, scope);
-  await open(anonymous, comments, doc.path, doc.commit);
-  await expect(pin(anonymous, "Visible to everyone")).toBeVisible();
-  await expect(ui(anonymous).getByTestId("commentor-comment-btn")).toBeDisabled();
-  expect(await offers(anonymous)).toEqual({ "Visible to everyone": { resolve: false, archive: false, delete: false, reply: false } });
-  await expect(card(anonymous, "Visible to everyone").locator(".reply")).toContainText("A reply anyone reads");
-  // Convex refuses every anonymous write outright.
+  // Anyone who is not signed in reads nothing of it, and every forged write is "not found" (#353).
+  expect(await threadsAs(undefined, scope)).toEqual([]);
   for (const [label, result] of await forgedWrites(undefined, scope, thread._id, await anchorOn(page, "quick brown"))) {
-    expect(result, label).toMatchObject({ ok: false, code: "unauthenticated" });
+    expect(result, label).toMatchObject({ ok: false, code: "not_found" });
   }
 
   // A signed-in reader who is not the author may triage (resolve, reply) but not archive or delete; forging those is refused.
   const member = await seeded("member");
   await open(member, comments, doc.path, doc.commit);
-  expect(await offers(member)).toEqual({ "Visible to everyone": { resolve: true, archive: false, delete: false, reply: true } });
+  expect(await offers(member)).toEqual({ "Visible to readers": { resolve: true, archive: false, delete: false, reply: true } });
   const memberToken = await sessionToken(member);
   expect(await writeThread(memberToken, scope, "archive", thread._id, { archived: true })).toMatchObject({ ok: false, code: "forbidden" });
   expect(await writeThread(memberToken, scope, "removeThread", thread._id)).toMatchObject({ ok: false, code: "forbidden" });
-  expect((await threadsAs(undefined, scope))).toEqual([expect.objectContaining({ _id: thread._id, resolved: false, archived: false, replies: [expect.objectContaining({ body: "A reply anyone reads" })] })]);
+  expect((await threadsAs(ownerToken, scope))).toEqual([expect.objectContaining({ _id: thread._id, resolved: false, archived: false, replies: [expect.objectContaining({ body: "A reply readers read" })] })]);
 });
 
-test("a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses", async ({ actor }) => {
+test("a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses", async ({ reader }) => {
   test.setTimeout(240_000);
   const { comments } = repos();
   const doc = await journeyDoc("limits");
   const scope = { repoId: repoIds.comments, path: doc.path };
-  const writer = await actor("limits");
+  const writer = await reader("limits");
   const { page } = writer;
   // The page clock runs as usual except while the test inspects a countdown, which it pauses so the notice cannot end
   // first. The writer's request is held on its way out until the allowance is spent through the API, so the refusal never

@@ -20,7 +20,7 @@ import { visualDocs } from "./visual/visual-repo-docs";
  */
 export type RepoFixture = { owner: string; name: string; commit: string };
 export type RepoFixtures = {
-  open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; control: string;
+  open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; commentsPublic: RepoFixture; viewerPrivate: RepoFixture; control: string;
   /** The shell's own chrome and links (#286, formerly on a CLI-pushed project): long pages with sections, links and a nested folder. */
   viewer: RepoFixture;
   /** Only in the visual runs (#268): a public repository of fixed Markdown for the baselines. */
@@ -82,14 +82,23 @@ export function repositoryWorld(options: { visual?: boolean } = {}) {
     open: github.repo("e2e-org", "open-docs", { id: 9001 }),
     closed: github.repo("e2e-org", "closed-docs", { id: 9002, private: true }),
     team: github.repo("e2e-org", "team-docs", { id: 9003, private: true }),
-    comments: github.repo("e2e-org", "comment-docs", { id: 9004 }),
+    // Comments exist on private repositories only (#353): comment-docs is private, comment-public proves a public one has none.
+    comments: github.repo("e2e-org", "comment-docs", { id: 9004, private: true }),
+    commentsPublic: github.repo("e2e-org", "comment-public", { id: 9008 }),
     commentsPrivate: github.repo("e2e-org", "comment-private", { id: 9005, private: true }),
     viewer: github.repo("e2e-org", "viewer-docs", { id: 9007 }),
-    ...(options.visual ? { visual: github.repo("e2e-org", "visual-docs", { id: 9006 }) } : {}),
+    // The viewer pages again, private, for the specs that comment on them (#353: comments exist on private repositories only).
+    viewerPrivate: github.repo("e2e-org", "viewer-private", { id: 9010, private: true }),
+    // Private: its comments (#353) are read by the seeded owner, a collaborator.
+    ...(options.visual ? { visual: github.repo("e2e-org", "visual-docs", { id: 9006, private: true }) } : {}),
   };
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
   repos.closed.collaborators.add(people.owner.id);
   repos.commentsPrivate.collaborators.add(people.owner.id);
+  repos.comments.collaborators.add(people.owner.id);
+  repos.viewerPrivate.collaborators.add(people.owner.id);
+  repos.visual?.collaborators.add(people.owner.id);
+  repos.comments.collaborators.add(people.member.id);
   // The home shows a repository's last push where GitHub's listing reports one (#338); a fixed time keeps the visual baselines stable.
   repos.closed.pushedAt = Date.parse("2026-10-01T09:30:00Z");
   // Readers who sign in with GitHub (#338), one per engine so the engines never share an account.
@@ -119,7 +128,7 @@ export async function seedRepositories(input: {
   const { github, installation, repos, people, team } = input.world;
   const commits = {
     open: repos.open.commit(docs("Open home")), closed: repos.closed.commit(docs("Closed home")), team: repos.team.commit(docs("Team home")),
-    comments: repos.comments.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()), viewer: repos.viewer.commit(viewerDocs()),
+    comments: repos.comments.commit(commentDocs()), commentsPublic: repos.commentsPublic.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()), viewer: repos.viewer.commit(viewerDocs()), viewerPrivate: repos.viewerPrivate.commit(viewerDocs()),
     visual: repos.visual?.commit(visualDocs()),
   };
   const deps = {
@@ -157,11 +166,14 @@ export async function seedRepositories(input: {
     });
     if (linked.status !== 204) throw new Error(`Linking admin answered ${linked.status}`);
   }
+  let readers = 0;
   // POST /membership/added|removed: the member joins or leaves the team, and GitHub's webhook follows.
   // POST /collaborator/added|removed: the owner gains or loses comment-private, and GitHub's webhook follows.
   // POST /role/<admin|maintain|write|triage|read|none>: the member's role on comment-docs (#259) changes, and GitHub's
   // `member` webhook follows. The member holds no role on it otherwise, so a spec that sets one must set `none` after.
-  // POST /commit/comments (or /commit/comments-private) with { changes }: a commit to comment-docs (comment-private), null
+  // POST /reader with { userId, repo? }: a signed-in account becomes a GitHub reader of comment-docs, or of viewer-private (a collaborator with read), so a
+  // journey can have as many distinct readers as it needs (their write quotas are their own).
+  // POST /commit/comments (or /commit/comments-private, /commit/comments-public) with { changes }: a commit to comment-docs (comment-private), null
   // deleting a file, ingested as a push would be.
   // GET /github/authorize?as=<login>&decision=approve|deny&<GitHub's query>: GitHub's answer to its authorize page (#338).
   const control = await listen((request, response) => {
@@ -192,15 +204,22 @@ export async function seedRepositories(input: {
         reply({ status: await deliver("member", { action: collaborator, member: { id: people.owner.id, login: people.owner.login }, repository: github.repoJson(repos.commentsPrivate) }) });
       } else if (request.method === "POST" && role) {
         const member = { id: people.member.id, login: people.member.login };
-        if (role === "none") {
-          repos.comments.collaborators.delete(member.id);
-          repos.comments.roles.delete(member.id);
-        } else {
-          repos.comments.roles.set(member.id, role);
-        }
-        reply({ status: await deliver("member", { action: role === "none" ? "removed" : "edited", member, repository: github.repoJson(repos.comments) }) });
-      } else if (request.method === "POST" && (url === "/commit/comments" || url === "/commit/comments-private")) {
-        const repo = url === "/commit/comments" ? repos.comments : repos.commentsPrivate;
+        // The member always reads comment-docs (a collaborator): "none" only takes the role away.
+        if (role === "none") repos.comments.roles.delete(member.id);
+        else repos.comments.roles.set(member.id, role);
+        reply({ status: await deliver("member", { action: "edited", member, repository: github.repoJson(repos.comments) }) });
+      } else if (request.method === "POST" && url === "/reader") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk as Buffer);
+        const { userId, repo } = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { userId: string; repo?: "comments" | "viewerPrivate" };
+        const person = github.user(`e2e-reader-${readers += 1}`, 9600 + readers);
+        repos[repo ?? "comments"].collaborators.add(person.id);
+        const linked = await input.service("https://repo-access.internal/v1/accounts/link", {
+          method: "POST", body: JSON.stringify({ userId, githubId: person.id, login: person.login, tokens: github.signIn(person) }),
+        });
+        reply({ status: linked.status });
+      } else if (request.method === "POST" && (url === "/commit/comments" || url === "/commit/comments-private" || url === "/commit/comments-public")) {
+        const repo = url === "/commit/comments" ? repos.comments : url === "/commit/comments-public" ? repos.commentsPublic : repos.commentsPrivate;
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(chunk as Buffer);
         const { changes } = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { changes: Record<string, string | null> };
@@ -217,8 +236,8 @@ export async function seedRepositories(input: {
   return {
     fixtures: {
       open: fixture(repos.open, commits.open), closed: fixture(repos.closed, commits.closed), team: fixture(repos.team, commits.team),
-      comments: fixture(repos.comments, commits.comments), commentsPrivate: fixture(repos.commentsPrivate, commits.commentsPrivate), control: control.origin,
-      viewer: fixture(repos.viewer, commits.viewer),
+      comments: fixture(repos.comments, commits.comments), commentsPublic: fixture(repos.commentsPublic, commits.commentsPublic), commentsPrivate: fixture(repos.commentsPrivate, commits.commentsPrivate), control: control.origin,
+      viewer: fixture(repos.viewer, commits.viewer), viewerPrivate: fixture(repos.viewerPrivate, commits.viewerPrivate),
       ...(repos.visual && commits.visual ? { visual: fixture(repos.visual, commits.visual) } : {}),
     },
     close: () => control.close(),

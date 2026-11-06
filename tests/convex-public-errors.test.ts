@@ -16,14 +16,14 @@ const thread = (f: Fixture) => ({ ...f.scope, threadId: f.threadId });
 const endpoints: Endpoint[] = [
   // Repository docs (#254): the read path's internal grant calls, then the comments themselves. Their own
   // cross-repository ID, anchor and access matrix is in tests/repo-comments-convex.test.ts.
-  { name: "repoCommentAccess:grant", kind: "mutation", args: () => ({ internalSecret: "wrong", repoId: 1, userId: null, epoch: 0, expiresAt: Date.now() + 1_000 }), ids: [] },
+  { name: "repoCommentAccess:grant", kind: "mutation", args: () => ({ internalSecret: "wrong", repoId: 1, userId: "user", epoch: 0, expiresAt: Date.now() + 1_000 }), ids: [] },
   { name: "repoCommentAccess:grantModerator", kind: "mutation", args: () => ({ internalSecret: "wrong", repoId: 1, userId: "user", role: "admin", epoch: 0, expiresAt: Date.now() + 1_000 }), ids: [] },
   { name: "repoCommentAccess:revokeUser", kind: "mutation", args: () => ({ internalSecret: "wrong", userId: "user", epoch: 1 }), ids: [] },
   { name: "repoCommentAccess:removeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
   { name: "repoCommentAccess:purgeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
   { name: "repoCommentAccess:restoreRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
   // The read path's first-page snapshot (#284): internal secret only.
-  { name: "repoComments:threadSnapshot", kind: "query", args: () => ({ internalSecret: "wrong", ...repoPage, userId: null, epoch: 0 }), ids: [] },
+  { name: "repoComments:threadSnapshot", kind: "query", args: () => ({ internalSecret: "wrong", ...repoPage, userId: "user", epoch: 0 }), ids: [] },
   { name: "repoComments:listThreads", kind: "query", args: f => ({ ...f.scope, paginationOpts }), ids: [] },
   { name: "repoComments:listReplies", kind: "query", args: f => ({ ...thread(f), paginationOpts }), ids: ["threadId"] },
   { name: "repoComments:createThread", kind: "mutation", args: f => ({ ...f.scope, body: "Test", anchor: repoAnchor() }), ids: [] },
@@ -89,8 +89,8 @@ describe("public Convex application error contract", () => {
       const denied = { ...args, ...repoPage };
       if (endpoint.kind === "query") expect(await call(f.backend, endpoint, denied)).toEqual({ page: [], isDone: true, continueCursor: "" });
       else await failure(call(f.backend, endpoint, denied), "not_found");
-      // Where anyone may read, writing still needs a signed-in reader.
-      if (endpoint.kind === "mutation") await failure(call(f.backend, endpoint, args), "unauthenticated");
+      // Comments exist on private repositories only (#353): a caller who is not signed in is denied the same way.
+      if (endpoint.kind === "mutation") await failure(call(f.backend, endpoint, args), "not_found");
       return;
     }
     await failure(call(f.backend, endpoint, args), "forbidden");
