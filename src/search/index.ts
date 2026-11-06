@@ -10,8 +10,11 @@ export interface SearchIndex {
   migrate(): Promise<void>;
   /** Whether any section of this blob is already indexed. */
   hasBlob(repoId: number, blobSha: string): Promise<boolean>;
-  /** Replace every indexed section of `blobSha` with `sections`. Idempotent. */
-  putBlob(repoId: number, blobSha: string, sections: readonly PageSection[]): Promise<void>;
+  /**
+   * Replace every indexed section of `blobSha` with `sections`. Idempotent.
+   * `replace: false` says the blob has no rows (a `hasBlob` miss), so nothing is deleted first.
+   */
+  putBlob(repoId: number, blobSha: string, sections: readonly PageSection[], options?: { replace?: boolean }): Promise<void>;
   /** Run a pre-neutralized FTS5 MATCH expression, at most `limit` rows. */
   query(repoId: number, match: string, limit: number): Promise<SearchHit[]>;
   /** Delete at most `limit` of the repository's sections (a purge or an expiry, #263). Returns how many went; 0 means none are left. */

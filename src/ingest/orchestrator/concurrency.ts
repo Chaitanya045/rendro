@@ -62,3 +62,51 @@ export class SingleFlight<T> {
     return this.flights.size;
   }
 }
+
+/**
+ * Starts tasks as capacity allows, at most `limit` at a time and (once one is
+ * running) at most `maxBytes` of declared payload in flight. A producer that
+ * reads from a stream awaits `submit` before pulling the next item, so a full
+ * pool applies backpressure to the stream instead of buffering it. One task
+ * larger than `maxBytes` still runs, alone. The first failure stops new work;
+ * `settle` waits for running work, and `failure` then holds the error.
+ */
+export class BoundedTasks {
+  private active = 0;
+  private bytes = 0;
+  private failed: { error: unknown } | null = null;
+  private waiting: Array<() => void> = [];
+  private idle: Array<() => void> = [];
+
+  constructor(private readonly limit: number, private readonly maxBytes: number) {}
+
+  /** The first task failure, or null. */
+  get failure(): { error: unknown } | null {
+    return this.failed;
+  }
+
+  /** Waits for capacity, then starts `task` without awaiting it. Returns false, starting nothing, once a task has failed. */
+  async submit(bytes: number, task: () => Promise<void>): Promise<boolean> {
+    while (this.failed === null && this.active > 0 && (this.active >= Math.max(1, this.limit) || this.bytes + bytes > this.maxBytes)) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    }
+    if (this.failed !== null) return false;
+    this.active += 1;
+    this.bytes += bytes;
+    void task().catch((error: unknown) => { this.failed ??= { error }; }).finally(() => {
+      this.active -= 1;
+      this.bytes -= bytes;
+      const sleepers = this.waiting;
+      this.waiting = [];
+      for (const resolve of sleepers) resolve();
+      if (this.active === 0) for (const resolve of this.idle.splice(0)) resolve();
+    });
+    return true;
+  }
+
+  /** Resolves once nothing is running. Never rejects: read `failure`. */
+  async settle(): Promise<void> {
+    if (this.active === 0) return;
+    await new Promise<void>((resolve) => this.idle.push(resolve));
+  }
+}

@@ -79,6 +79,97 @@ describe("d1SearchIndex", () => {
     expect(await index.hasBlob(7, "b".repeat(40))).toBe(false);
   });
 
+  /** The SQLite double with every batch recorded (its statements' SQL, in order) and optionally delayed or failed. */
+  function batched(options: { delay?: number; fail?: (batch: number) => boolean } = {}) {
+    const database = new SqliteSearchD1();
+    const batches: string[][] = [];
+    const timeline = { active: 0, peak: 0, finished: 0 };
+    const d1: SearchD1 = {
+      prepare(sql) {
+        const statement = database.prepare(sql);
+        const recorded: SearchD1Statement & { sql: string } = {
+          sql,
+          bind(...values) { statement.bind(...values); return recorded; },
+          all: () => statement.all(),
+          run: () => statement.run(),
+        };
+        return recorded;
+      },
+      async batch(statements) {
+        const number = batches.length;
+        batches.push(statements.map(statement => (statement as SearchD1Statement & { sql: string }).sql));
+        timeline.active += 1;
+        timeline.peak = Math.max(timeline.peak, timeline.active);
+        await new Promise(resolve => setTimeout(resolve, options.delay ?? 0));
+        timeline.active -= 1;
+        timeline.finished += 1;
+        if (options.fail?.(number)) throw new Error("D1 down");
+        return database.batch(statements);
+      },
+      exec: sql => database.exec(sql),
+    };
+    return { database, d1, batches, timeline };
+  }
+  const isDelete = (sql: string) => sql.startsWith("DELETE FROM sections");
+  const many = (count: number) => Array.from({ length: count }, (_, index) => section(`s${index}`, `S${index}`, `chunk number ${index} text`));
+
+  it("folds the DELETE into the first batch and overlaps the remaining batches", async () => {
+    const { d1, batches, timeline } = batched({ delay: 5 });
+    const index = d1SearchIndex(d1);
+    await index.migrate();
+    batches.length = 0;
+    timeline.peak = 0;
+    await index.putBlob(7, "a".repeat(40), many(95));
+    expect(batches.map(batch => batch.length)).toEqual([41, 40, 15]);
+    expect(batches.flat().filter(isDelete)).toHaveLength(1);
+    expect(isDelete(batches[0][0])).toBe(true);
+    // The two later batches are in flight together; the first finished before they started (it holds the DELETE).
+    expect(timeline.peak).toBe(2);
+    expect((await index.query(7, '"chunk"', 200))).toHaveLength(95);
+  });
+
+  it("sends a short page in one batch with its DELETE, and an empty one as the DELETE alone", async () => {
+    const { d1, batches } = batched();
+    const index = d1SearchIndex(d1);
+    await index.migrate();
+    batches.length = 0;
+    await index.putBlob(7, "a".repeat(40), many(3));
+    await index.putBlob(7, "b".repeat(40), []);
+    expect(batches.map(batch => batch.length)).toEqual([4, 1]);
+    expect(isDelete(batches[1][0])).toBe(true);
+  });
+
+  it("skips the DELETE for a blob known to have no rows, and sends nothing for an empty one", async () => {
+    const { d1, batches, database } = batched();
+    const index = d1SearchIndex(d1);
+    await index.migrate();
+    batches.length = 0;
+    await index.putBlob(7, "a".repeat(40), many(45), { replace: false });
+    expect(batches.map(batch => batch.length)).toEqual([40, 5]);
+    expect(batches.flat().some(isDelete)).toBe(false);
+    batches.length = 0;
+    await index.putBlob(7, "b".repeat(40), [], { replace: false });
+    expect(batches).toEqual([]);
+    // `replace: true` is the default behaviour spelled out.
+    await index.putBlob(7, "a".repeat(40), many(2), { replace: true });
+    expect(database.database.prepare("SELECT COUNT(*) AS n FROM sections WHERE repo_id = 7").all()[0].n).toBe(2);
+  });
+
+  it("lets every overlapping batch settle before it reports a failure", async () => {
+    const { d1, batches, timeline } = batched({ delay: 3, fail: batch => batch === 2 });
+    const index = d1SearchIndex(d1);
+    await index.migrate();
+    batches.length = 0;
+    timeline.finished = 0;
+    await expect(index.putBlob(7, "a".repeat(40), many(125))).rejects.toThrow("D1 down");
+    expect(batches).toHaveLength(4);
+    expect(timeline.active).toBe(0);
+    expect(timeline.finished).toBe(4);
+    // The retry replaces whatever the failed attempt left.
+    await d1SearchIndex(d1).putBlob(7, "a".repeat(40), many(125));
+    expect((await index.query(7, '"chunk"', 200))).toHaveLength(125);
+  });
+
   it("ranks title matches first and wraps matches in the snippet", async () => {
     const index = d1SearchIndex(new SqliteSearchD1());
     await index.migrate();

@@ -3,7 +3,7 @@ import type { GitHubSource, GitTreeEntry, RepoRef } from "../github/source";
 import { readTar, TarError } from "../github/tar";
 import type { SearchIndex } from "../../search/index";
 import { sectionsFromHtml, type PageSection } from "../sections";
-import { workPool } from "./concurrency";
+import { BoundedTasks, workPool } from "./concurrency";
 import { blobKey, manifestKey, renderObjectKey, sidebarKey } from "./keys";
 import { PageRenderError, type ContentPipeline, type PipelineDocSet, type PipelineTreeEntry } from "./pipeline";
 import type { RepoContent } from "./store";
@@ -76,6 +76,10 @@ export interface SnapshotOptions {
   maxAssetBytes?: number;
   maxAssets?: number;
   concurrency?: number;
+  /** Pages rendered at once while blobs arrive from the archive or from storage. Default 6. */
+  renderConcurrency?: number;
+  /** Source bytes of pages being rendered at once (a single larger page runs alone). Default 4 MiB. */
+  renderBytes?: number;
   tree?: TreeListingOptions;
 }
 
@@ -113,9 +117,18 @@ const DEFAULT_TARBALL: TarballPolicy = {
   smallRepoBytes: 16 * 1024 * 1024,
   minDocsShare: 0.25,
 };
+const DEFAULT_RENDER_CONCURRENCY = 6;
+const DEFAULT_RENDER_BYTES = 4 * 1024 * 1024;
 const SYMLINK_MODE = "120000";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+/** A page's render or storage failed while the archive was being read: unlike a bad archive, it fails the job. */
+class PageWorkError extends Error {
+  constructor(readonly reason: unknown) {
+    super("Page work failed");
+  }
+}
 
 type SizedEntry = GitTreeEntry & { size: number };
 
@@ -235,6 +248,8 @@ class FileBuilder {
   private readonly missing = new Map<string, { size: number; maxBytes: number }>();
   /** Blobs already in storage whose pages still need rendering. */
   private readonly storedPending = new Map<string, number>();
+  /** Blob ID → its index write in this build, so a blob at several paths is written once and never concurrently. */
+  private readonly written = new Map<string, Promise<void>>();
   private readonly maxAssetBytes: number;
 
   constructor(private readonly context: SnapshotContext, private readonly previous: SnapshotManifest | null, private readonly stats: SnapshotStats) {
@@ -273,7 +288,8 @@ class FileBuilder {
         // A reused render whose key changed (a renderer bump, a new path): the
         // stored HTML still carries the heading ids, so index from it — once,
         // only when the blob has no rows yet; unchanged blobs reuse their rows.
-        if ("html" in rendered && !(await this.indexed(entry.sha))) await this.index(entry.sha, sectionsFromHtml(rendered.html));
+        // No rows yet, so the write skips its DELETE.
+        if ("html" in rendered && !(await this.indexed(entry.sha))) await this.index(entry.sha, sectionsFromHtml(rendered.html), false);
         return;
       }
       const waiting = this.waiting.get(entry.sha) ?? [];
@@ -310,15 +326,21 @@ class FileBuilder {
 
   async fetchMissing(commitSha: string, walked: boolean, usable: readonly SizedEntry[], options: SnapshotOptions): Promise<void> {
     const { content, repo, source } = this.context;
-    for (const sha of this.storedPending.keys()) {
-      await this.arrived(sha, await content.getBytes(blobKey(repo.id, sha)) as Uint8Array, false);
+    // Pages whose blob is already stored (an interrupted attempt, a renderer bump) read from R2 and render in the pool.
+    const stored = new BoundedTasks(options.renderConcurrency ?? DEFAULT_RENDER_CONCURRENCY, options.renderBytes ?? DEFAULT_RENDER_BYTES);
+    for (const [sha, size] of this.storedPending) {
+      if (!await stored.submit(size, async () => { await this.arrived(sha, await content.getBytes(blobKey(repo.id, sha)) as Uint8Array, false); })) break;
     }
+    await stored.settle();
+    if (stored.failure) throw stored.failure.error;
     if (this.missing.size === 0) return;
     if (this.useTarball(walked, usable, options)) {
       this.stats.mode = "tarball";
       try {
-        await this.readTarball(commitSha);
+        await this.readTarball(commitSha, options);
       } catch (error) {
+        // A page that failed to render or store is not an archive problem: the job fails, as it does per blob.
+        if (error instanceof PageWorkError) throw error.reason;
         // An expired link, a truncated stream, bad gzip or a rate limit: fetch what is still missing
         // one blob at a time. Deterministic failures (storage, rendering) recur there and fail the job.
         this.stats.tarballFallback = true;
@@ -343,7 +365,7 @@ class FileBuilder {
     return missingBytes / repoBytes >= policy.minDocsShare;
   }
 
-  private async readTarball(commitSha: string): Promise<void> {
+  private async readTarball(commitSha: string, options: SnapshotOptions): Promise<void> {
     const { source, repo } = this.context;
     const byPath = new Map<string, string>();
     for (const [sha] of this.missing) {
@@ -354,34 +376,59 @@ class FileBuilder {
     }
     const largest = Math.max(...[...this.missing.values()].map((blob) => blob.maxBytes));
     let commentOk = true;
-    const archive = await source.getTarball(repo, commitSha);
-    for await (const entry of readTar(archive, {
-      maxEntryBytes: largest,
-      // GitHub prefixes every path with "<owner>-<repo>-<short sha>/".
-      want: (path, size) => {
-        const sha = byPath.get(path.slice(path.indexOf("/") + 1));
-        return sha !== undefined && this.missing.get(sha)?.size === size;
-      },
-      onGlobalHeader: (attributes) => { commentOk = attributes.get("comment") === commitSha; },
-    })) {
-      if (!commentOk) throw new TarError("Archive is for a different commit");
-      if (!entry.content) continue;
-      const sha = byPath.get(entry.path.slice(entry.path.indexOf("/") + 1)) as string;
-      // `want` only accepts blobs still missing. export-subst, LFS smudging or a line-ending
-      // policy change the bytes: such files fall back to the blob API.
-      if (!await matchesBlobId(entry.content, sha)) continue;
-      this.stats.tarballBlobs += 1;
-      await this.arrived(sha, entry.content, true);
+    // Pages render while the archive keeps streaming; a full pool pauses the reader, so the bytes in flight stay bounded.
+    const tasks = new BoundedTasks(options.renderConcurrency ?? DEFAULT_RENDER_CONCURRENCY, options.renderBytes ?? DEFAULT_RENDER_BYTES);
+    let readError: { error: unknown } | null = null;
+    try {
+      const archive = await source.getTarball(repo, commitSha);
+      for await (const entry of readTar(archive, {
+        maxEntryBytes: largest,
+        // GitHub prefixes every path with "<owner>-<repo>-<short sha>/".
+        want: (path, size) => {
+          const sha = byPath.get(path.slice(path.indexOf("/") + 1));
+          return sha !== undefined && this.missing.get(sha)?.size === size;
+        },
+        onGlobalHeader: (attributes) => { commentOk = attributes.get("comment") === commitSha; },
+      })) {
+        if (!commentOk) throw new TarError("Archive is for a different commit");
+        if (!entry.content) continue;
+        const sha = byPath.get(entry.path.slice(entry.path.indexOf("/") + 1)) as string;
+        const { content } = entry;
+        // `want` only accepts blobs still missing. export-subst, LFS smudging or a line-ending
+        // policy change the bytes: such files fall back to the blob API.
+        if (!await matchesBlobId(content, sha)) continue;
+        if (!await tasks.submit(content.length, () => this.arrived(sha, content, true))) break;
+        this.stats.tarballBlobs += 1;
+      }
+    } catch (error) {
+      readError = { error };
     }
+    await tasks.settle();
+    // Work that failed outranks the stream: it fails the job, while the stream's errors fall back to per-blob requests.
+    if (tasks.failure) throw new PageWorkError(tasks.failure.error);
+    if (readError) throw readError.error;
   }
 
+  /**
+   * A blob's bytes are here: store them (unless they came from storage), render its pages and index them.
+   * The source put overlaps the rendering and the index write; a page's render object is written only after
+   * the source and the index, so a stored render always implies stored source and rows (a retry reuses it).
+   */
   private async arrived(sha: string, bytes: Uint8Array, store: boolean): Promise<void> {
-    const { content, repo, pipeline } = this.context;
+    const { content, repo } = this.context;
     this.missing.delete(sha);
-    if (store) await content.putBytes(blobKey(repo.id, sha), bytes);
     const pages = this.waiting.get(sha) ?? [];
     this.waiting.delete(sha);
-    if (pages.length === 0) return;
+    const sourcePut = store ? content.putBytes(blobKey(repo.id, sha), bytes) : Promise.resolve();
+    const rendering = pages.length === 0 ? Promise.resolve() : this.renderPages(sha, bytes, pages, sourcePut);
+    // Let both settle so no write is left running after a failure; the earlier step's error wins.
+    const [putResult, renderResult] = await Promise.allSettled([sourcePut, rendering]);
+    if (putResult.status === "rejected") throw putResult.reason;
+    if (renderResult.status === "rejected") throw renderResult.reason;
+  }
+
+  private async renderPages(sha: string, bytes: Uint8Array, pages: readonly PendingPage[], sourcePut: Promise<void>): Promise<void> {
+    const { content, repo, pipeline } = this.context;
     const source = decoder.decode(bytes);
     for (const page of pages) {
       let stored: RenderedObject;
@@ -396,18 +443,25 @@ class FileBuilder {
         stored = { error: error.reason };
         this.files[page.path] = { sha, size: page.size, render: page.key, error: error.reason };
       }
+      await sourcePut;
       await content.putJson(renderObjectKey(repo.id, page.key), stored);
     }
   }
 
   /**
    * Index one blob's sections (#251). Content-addressed, so a blob rendered
-   * twice or at two paths is stored once; the section list may be absent under
-   * a test pipeline, in which case there is nothing to index.
+   * twice or at two paths is stored once (concurrent pages share one write);
+   * the section list may be absent under a test pipeline, in which case there
+   * is nothing to index. `replace: false` is for a blob known to have no rows.
    */
-  private async index(blobSha: string, sections: readonly PageSection[] | undefined): Promise<void> {
-    if (!this.context.search || sections === undefined) return;
-    await this.context.search.putBlob(this.context.repo.id, blobSha, sections);
+  private index(blobSha: string, sections: readonly PageSection[] | undefined, replace = true): Promise<void> {
+    if (!this.context.search || sections === undefined) return Promise.resolve();
+    let write = this.written.get(blobSha);
+    if (!write) {
+      write = this.context.search.putBlob(this.context.repo.id, blobSha, sections, { replace });
+      this.written.set(blobSha, write);
+    }
+    return write;
   }
 
   /** Whether the blob already has rows: false without a bound index (nothing is ever reused). */

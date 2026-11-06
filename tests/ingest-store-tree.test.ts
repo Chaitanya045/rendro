@@ -4,7 +4,7 @@ import { GitHubError } from "../src/ingest/github/source";
 import { treeKey } from "../src/ingest/orchestrator/keys";
 import { plaintextSealer, r2Store, readJson, RepoContent, writeJson, type ContentSealer } from "../src/ingest/orchestrator/store";
 import { defaultSkipDirectory, listCommitTree } from "../src/ingest/orchestrator/tree-listing";
-import { workPool, SingleFlight } from "../src/ingest/orchestrator/concurrency";
+import { BoundedTasks, workPool, SingleFlight } from "../src/ingest/orchestrator/concurrency";
 import { FakeR2Bucket } from "./helpers/fake-storage";
 import { ingestFixture } from "./helpers/ingest-fixture";
 
@@ -126,6 +126,53 @@ describe("concurrency helpers", () => {
       if (item === 2) throw new Error("boom");
     })).rejects.toThrow("boom");
     expect(seen.length).toBeLessThan(5);
+  });
+
+  it("starts bounded tasks by count and by declared bytes, and lets one oversized task run alone", async () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 2));
+    const run = async (limit: number, maxBytes: number, sizes: number[]) => {
+      const tasks = new BoundedTasks(limit, maxBytes);
+      let active = 0;
+      let bytes = 0;
+      const peak = { active: 0, bytes: 0 };
+      for (const size of sizes) {
+        expect(await tasks.submit(size, async () => {
+          active += 1;
+          bytes += size;
+          peak.active = Math.max(peak.active, active);
+          peak.bytes = Math.max(peak.bytes, bytes);
+          await tick();
+          active -= 1;
+          bytes -= size;
+        })).toBe(true);
+      }
+      await tasks.settle();
+      expect(tasks.failure).toBeNull();
+      return peak;
+    };
+    expect(await run(3, 1000, [1, 1, 1, 1, 1, 1, 1])).toEqual({ active: 3, bytes: 3 });
+    expect(await run(10, 100, [40, 40, 40, 40, 40])).toEqual({ active: 2, bytes: 80 });
+    // A task over the byte budget still runs, with nothing next to it; a limit of 0 is treated as 1.
+    expect(await run(5, 100, [10, 500, 10, 10])).toEqual({ active: 2, bytes: 500 });
+    expect(await run(0, 100, [1, 1, 1])).toEqual({ active: 1, bytes: 1 });
+    await new BoundedTasks(1, 1).settle();
+  });
+
+  it("stops starting bounded tasks at the first failure, waits for running ones, and keeps the error", async () => {
+    const tasks = new BoundedTasks(3, 1000);
+    const finished: string[] = [];
+    expect(await tasks.submit(1, async () => { await new Promise((resolve) => setTimeout(resolve, 10)); finished.push("slow"); })).toBe(true);
+    expect(await tasks.submit(1, () => Promise.reject(new Error("boom")))).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(await tasks.submit(1, () => { finished.push("never"); return Promise.resolve(); })).toBe(false);
+    await tasks.settle();
+    expect(finished).toEqual(["slow"]);
+    expect((tasks.failure?.error as Error).message).toBe("boom");
+    // A submit already waiting for capacity when the failure lands also gives up.
+    const waiting = new BoundedTasks(1, 1000);
+    await waiting.submit(1, async () => { await new Promise((resolve) => setTimeout(resolve, 2)); throw new Error("late"); });
+    expect(await waiting.submit(1, () => Promise.resolve())).toBe(false);
+    await waiting.settle();
   });
 
   it("coalesces concurrent calls per key", async () => {
