@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
+import { signInSeeded } from "./shell-helpers";
 import type { RepoFixtures } from "./repo-fixtures";
 
 /** The public repository the read path serves (#234); its frames are opaque documents like any publisher page. */
@@ -36,7 +37,9 @@ test("sign-in renders through the Worker", async ({ page, cspViolations }) => {
   expect(cspViolations).toEqual([]);
 });
 
-test("a repository document loads inside an opaque frame with its SVG", async ({ page }) => {
+test("a repository document loads inside an opaque frame with its SVG", async ({ page, context, baseURL, seed }) => {
+  // Every read needs a signed-in reader (#354), public repositories included.
+  await signInSeeded(context, baseURL, seed, "outsider");
   const [document, asset, shell] = await Promise.all([
     page.waitForResponse(response => response.url().endsWith(`${pinned()}/files/docs/index.md`)),
     page.waitForResponse(response => response.url().endsWith("/files/docs/img/logo.svg")),
@@ -57,7 +60,8 @@ test("a repository document loads inside an opaque frame with its SVG", async ({
   await expect(frame.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 64);
 });
 
-test("direct SVG navigation retains document isolation", async ({ page }) => {
+test("direct SVG navigation retains document isolation", async ({ page, context, baseURL, seed }) => {
+  await signInSeeded(context, baseURL, seed, "outsider");
   const response = await page.goto(`${pinned()}/files/docs/img/logo.svg`);
   expect(response?.status()).toBe(200);
   expect(response?.headers()["content-type"]).toBe("image/svg+xml");

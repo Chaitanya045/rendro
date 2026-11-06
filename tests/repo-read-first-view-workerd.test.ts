@@ -47,7 +47,8 @@ function sessionResponse(request: Request): Response {
   });
 }
 
-async function get(path: string, headers: Record<string, string> = {}): Promise<Response> {
+/** Every read needs a signed-in reader (#354). */
+async function get(path: string, headers: Record<string, string> = { cookie: "better-auth.session_token=reader-token.sig" }): Promise<Response> {
   return server.fetch(new URL(path, origin), { headers, redirect: "manual" }) as unknown as Promise<Response>;
 }
 

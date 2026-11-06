@@ -130,9 +130,11 @@ async function openFrame(path: string, cookie?: string) {
 }
 
 describe("repository document frames in Chromium", () => {
-  it("render proxied and repository images in a public frame and block an external one", async () => {
-    const result = await openFrame(`/r/${publicRepo.owner}/${publicRepo.name}/@${fixture.commits.public}/files/docs/images.md`);
+  it("render proxied images and ticketed repository images in a public frame and block an external one (#354)", async () => {
+    const result = await openFrame(`/r/${publicRepo.owner}/${publicRepo.name}/@${fixture.commits.public}/files/docs/images.md`, "better-auth.session_token=reader-token.sig");
     expect(result.widths).toEqual({ proxied: 1, repository: 1, external: 0 });
+    // A public frame is the same opaque sandbox: its repository image loads through the ticket in its URL.
+    expect(result.sources.repository).toMatch(/\/view\/v1\.[\w-]+\.[\w-]+\/files\/docs\/img\/pixel\.png$/);
     expect(result.violations).toContain(`img-src ${EXTERNAL}`);
     expect(requests.some(path => path.startsWith("/img/"))).toBe(true);
   });
@@ -237,6 +239,7 @@ describe("repository document frames in Chromium", () => {
 
   it("keeps the wide pre and table blocks reachable from the keyboard with a visible focus ring (#270)", async () => {
     const page = await harness.newPage();
+    await page.context().addCookies([{ name: "better-auth.session_token", value: "reader-token.sig", url: harness.origin }]);
     await browserStep("open the wide-block frame", () => page.goto(`${harness.origin}/viewer?frame=${encodeURIComponent(`/r/${publicRepo.owner}/${publicRepo.name}/@${fixture.commits.public}/files/docs/images.md`)}`));
     const frame = () => page.frames().find(candidate => candidate.name() === "content-frame" && candidate.url().includes("/files/docs/images.md"));
     await expect.poll(() => frame() !== undefined && frame()!.evaluate(() => document.readyState === "complete").catch(() => false)).toBe(true);

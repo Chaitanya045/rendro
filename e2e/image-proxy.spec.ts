@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { imageProxyPath } from "../src/image-proxy";
 import { test, expect } from "./fixtures";
 import { assertLoopback, localHttp } from "./backend";
+import { signInSeeded } from "./shell-helpers";
 import { imageHostOrigin, type ImageHostRequest } from "./services";
 import type { RepoFixtures } from "./repo-fixtures";
 
@@ -30,8 +31,9 @@ async function imageHostRequests(): Promise<ImageHostRequest[]> {
 }
 
 test.describe("image proxy", () => {
-  test("a rendered document's external images load only through our origin", async ({ page, baseURL }) => {
+  test("a rendered document's external images load only through our origin", async ({ page, baseURL, seed }) => {
     test.setTimeout(90_000);
+    await signInSeeded(page.context(), baseURL, seed, "outsider");
     // A unique query per run keeps the Worker's cache from answering for an earlier run or engine.
     const run = randomBytes(6).toString("hex");
     const pixel = `${imageHostOrigin}/pixel.png?run=${run}`;

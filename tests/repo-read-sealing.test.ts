@@ -215,13 +215,15 @@ describe("the read path over sealed content", () => {
   it("reports views to the coordinator at most once an hour per repository and visibility", async () => {
     const coordinator = new FakeIngestCoordinator();
     fixture.env.REPO_INGEST = coordinator.namespace;
-    expect((await get(pub)).status).toBe(200);
-    expect((await get(`${pub}/tree?dir=`)).status).toBe(200);
+    const stranger = { cookie: sessionCookies.outsider };
+    expect((await get(pub, stranger)).status).toBe(200);
+    expect((await get(`${pub}/tree?dir=`, stranger)).status).toBe(200);
     expect((await get(priv, { cookie: sessionCookies.reader })).status).toBe(200);
     await fixture.settle();
     expect(coordinator.touches).toEqual([{ id: publicRepo.id, private: false }, { id: privateRepo.id, private: true }]);
     // Denied and unknown requests report nothing.
-    expect((await get(priv)).status).toBe(404);
+    expect((await get(priv, stranger)).status).toBe(404);
+    expect((await get(priv)).status).toBe(302);
     await fixture.settle();
     expect(coordinator.touches).toHaveLength(2);
   });
