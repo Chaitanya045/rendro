@@ -193,6 +193,35 @@ describe("the home page (#338)", () => {
     expect(html).not.toContain("home-open-title");
   });
 
+  it("offers a box that opens any public repository, by address or owner/repo, and says when the text is not one (#354)", async () => {
+    github();
+    const visit = home(listing({ linked: true, truncated: false, repositories: [] }));
+    const page = (await visit()).html;
+    expect(page).toContain('<form class="home-open-form" method="get" action="/home/open" aria-labelledby="home-open-form-title">');
+    expect(page).toContain('name="repo"');
+    expect(page).not.toContain("home-open-error");
+    for (const [typed, location] of [["octo/docs", "/r/octo/docs"], ["https://github.com/Octo/My.Repo.git", "/r/Octo/My.Repo"], ["git@github.com:octo/docs.git", "/r/octo/docs"]] as const) {
+      const opened = await visit(`/home/open?repo=${encodeURIComponent(typed)}`);
+      expect(opened.response.status, typed).toBe(302);
+      expect(opened.response.headers.get("location"), typed).toBe(location);
+    }
+    for (const typed of ["not a repo", "https://evil.test/octo/docs", "", "octo/..", `x${"y".repeat(400)}`]) {
+      const refused = await visit(`/home/open?repo=${encodeURIComponent(typed)}`);
+      expect(refused.response.status, typed).toBe(400);
+      expect(refused.html, typed).toContain('id="home-open-error" role="alert"');
+      expect(refused.html, typed).toContain('aria-invalid="true"');
+      expect(refused.html, typed).toContain("Your repositories");
+    }
+    // The typed text is shown back, escaped, and no more than a repository address can be long.
+    const hostile = (await visit(`/home/open?repo=${encodeURIComponent('"><script>alert(1)</script>')}`)).html;
+    expect(hostile).not.toContain("<script>alert(1)");
+    expect(hostile).toContain("&lt;script&gt;");
+    expect((await visit(`/home/open?repo=${"y".repeat(400)}`)).html).not.toContain("y".repeat(301));
+    expect((await visit("/home/open")).response.status).toBe(400);
+    // Signed out, the box is the sign-in redirect like the home itself.
+    expect((await home(listing({}), null)("/home/open?repo=octo/docs")).response.headers.get("location")).toBe("/sign-in?returnTo=%2Fhome");
+  });
+
   it("explains an empty list, offers to connect GitHub, and offers to try again", async () => {
     github();
     const empty = (await home(listing({ linked: true, truncated: false, repositories: [] }))()).html;

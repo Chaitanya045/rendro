@@ -115,6 +115,8 @@ With GitHub sign-in configured and the `REPO_ACCESS` binding present, `/home` li
 
 Back from the App's setup URL, `?github=installed` or `?github=requested` adds a status notice above the list.
 
+**Open a public repository (#354).** Above the list, a box takes `owner/repo` or a GitHub address of a repository (`https://github.com/owner/repo`, with `www.`, `.git`, a trailing path or query, or an SSH remote; `src/github-repo-input.ts`, checked by GitHub's own name rules) and submits to `GET /home/open?repo=…`, a plain form that needs no script. A valid answer is a `302` to `/r/{owner}/{repo}`, where the read path takes over: an installed repository, a registered public one or a lookup against GitHub ([Public repositories without an installation](#public-repositories-without-an-installation-354)). Anything else re-renders the home with a `400`, the typed text (cut to 300 characters, escaped) and an `aria-invalid` field described by a `role="alert"` message. Signed out, it is the home's own sign-in redirect. The box shows wherever the repository list does.
+
 ### GitHub sign-in (P1)
 
 GitHub sign-in (#338) is Better Auth's GitHub provider over the GitHub App's user-to-server OAuth. It is built and tested against the fake GitHub (`tests/helpers/fake-github.ts`) and switched on by configuration alone:
@@ -1327,7 +1329,7 @@ On workerd (`tests/ingest-workerd.test.ts`, local machine, real comrak bundled a
 
 GitHub never retries a failed webhook, and sends no event for some bulk pushes. The cron therefore runs two independent steps; a failure in one is logged and does not stop the other.
 
-- **Heads.** For each `tracked/` entry, the repository's coordinator re-checks every tracked branch with its stored ETag. A head that differs from the pointer is queued like a push; a head with a recorded permanent failure is skipped. Repositories share the token's governor, so once GitHub rate-limits one check, the rest wait for the next run.
+- **Heads.** For each `tracked/` entry, the repository's coordinator re-checks every tracked branch with its stored ETag. A head that differs from the pointer is queued like a push; a head with a recorded permanent failure is skipped. This is also how public repositories without an installation stay fresh ([#354](#public-repositories-without-an-installation-354)): they have no webhooks, their entry carries no installation, and the check is read with the public-read token (a conditional request, so an unchanged head is a free 304; `tests/ingest-public-repos.test.ts`). A repository that turned private or vanished answers 404 to that token and is skipped quietly until idle expiry removes its entry. Repositories share the token's governor, so once GitHub rate-limits one check, the rest wait for the next run.
 - **Redelivery.** The `WebhookDeliveries` client lists app webhook deliveries (newest first) back to the checkpoint, minus an hour of overlap, and never further than GitHub's three-day window. It groups them by GUID and redelivers those whose newest attempt failed, oldest first, up to 20 per run. A GUID that failed three times is logged and left alone. The checkpoint advances only when a run saw the whole window and handled every failure. The app JWT comes with P1; until then the step reports `not-configured`.
 
 ## Repository Read Path (GitHub pivot, P4a)
