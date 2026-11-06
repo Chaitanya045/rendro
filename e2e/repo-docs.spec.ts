@@ -88,6 +88,22 @@ test("a signed-in reader browses a public repository: entry page, sidebar titles
   expect((await page.context().cookies()).find(cookie => /^(?:__Host-)?rendro-repo\.9001$/.test(cookie.name))).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
 });
 
+test("a signed-in reader opens a public repository the App is not installed on; the owner installed nothing (#354)", async ({ page, request, seed, baseURL }) => {
+  const { uninstalled } = repos();
+  const url = `/r/${uninstalled.owner}/${uninstalled.name}`;
+  // Signed out, it is the same redirect as for any repository.
+  expect((await request.get(url, { maxRedirects: 0 })).status()).toBe(302);
+  await signInSeeded(page.context(), baseURL, seed, "outsider");
+  expect((await page.goto(url))?.status()).toBe(200);
+  await expect(heading(page, "Library home")).toBeVisible();
+  await expectLogoRendered(page);
+  expect((await page.context().cookies()).find(cookie => /^(?:__Host-)?rendro-repo\.9008$/.test(cookie.name))).toMatchObject({ httpOnly: true, path: "/" });
+  // A repository that does not exist, and one that is private, are the same plain 404.
+  const missing = await page.goto(`/r/${uninstalled.owner}/no-such-repo`);
+  expect(missing?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+});
+
 test("a granted reader browses a private repository with a capability cookie and ticketed images; others get a plain 404", async ({ page, secondContext, seed, baseURL }) => {
   const { closed } = repos();
   const url = `/r/${closed.owner}/${closed.name}`;

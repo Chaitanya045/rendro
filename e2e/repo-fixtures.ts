@@ -23,6 +23,8 @@ export type RepoFixtures = {
   open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; control: string;
   /** The shell's own chrome and links (#286, formerly on a CLI-pushed project): long pages with sections, links and a nested folder. */
   viewer: RepoFixture;
+  /** A public repository the App is not installed on (#354): any signed-in reader opens it, through the public-read token. */
+  uninstalled: RepoFixture;
   /** Only in the visual runs (#268): a public repository of fixed Markdown for the baselines. */
   visual?: RepoFixture;
 };
@@ -87,6 +89,8 @@ export function repositoryWorld(options: { visual?: boolean } = {}) {
     viewer: github.repo("e2e-org", "viewer-docs", { id: 9007 }),
     ...(options.visual ? { visual: github.repo("e2e-org", "visual-docs", { id: 9006 }) } : {}),
   };
+  // Public, and on no installation: the control Worker resolves it with the fake GitHub's public-read token (#354).
+  const uninstalled = github.repo("e2e-lib", "public-docs", { id: 9008 });
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
   repos.closed.collaborators.add(people.owner.id);
   repos.commentsPrivate.collaborators.add(people.owner.id);
@@ -100,7 +104,7 @@ export function repositoryWorld(options: { visual?: boolean } = {}) {
     repos.commentsPrivate.collaborators.add(reader.id);
   });
   const team = github.team("e2e-org", "docs-readers", [people.member], [repos.team]);
-  return { github, installation, repos, people, team };
+  return { github, installation, repos, uninstalled, people, team };
 }
 
 export type RepositoryWorld = ReturnType<typeof repositoryWorld>;
@@ -116,11 +120,12 @@ export async function seedRepositories(input: {
   search?: SearchIndex;
 }): Promise<{ fixtures: RepoFixtures; close(): Promise<void> }> {
   initNodeMarkdownEngine();
-  const { github, installation, repos, people, team } = input.world;
+  const { github, installation, repos, uninstalled, people, team } = input.world;
   const commits = {
     open: repos.open.commit(docs("Open home")), closed: repos.closed.commit(docs("Closed home")), team: repos.team.commit(docs("Team home")),
     comments: repos.comments.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()), viewer: repos.viewer.commit(viewerDocs()),
     visual: repos.visual?.commit(visualDocs()),
+    uninstalled: uninstalled.commit(docs("Library home")),
   };
   const deps = {
     source: new HttpGitHubSource({ tokens: staticTokenProvider(github.token), fetch: github.fetch, apiOrigin: github.origin, archiveOrigins: [github.archiveOrigin] }),
@@ -128,7 +133,8 @@ export async function seedRepositories(input: {
     ...(input.search ? { search: input.search } : {}),
   };
   const etags = { get: () => Promise.resolve(null), set: () => Promise.resolve() };
-  for (const repo of Object.values(repos)) {
+  // The uninstalled repository's snapshot is ingested here, as a first view would build it (no ingest Worker runs in the E2E harness).
+  for (const repo of [...Object.values(repos), uninstalled]) {
     const result = await ingestBranch(deps, etags, repo.ref, "main");
     if (result.status !== "flipped") throw new Error(`Repository fixture ${repo.name} was not ingested (${result.status})`);
   }
@@ -218,7 +224,7 @@ export async function seedRepositories(input: {
     fixtures: {
       open: fixture(repos.open, commits.open), closed: fixture(repos.closed, commits.closed), team: fixture(repos.team, commits.team),
       comments: fixture(repos.comments, commits.comments), commentsPrivate: fixture(repos.commentsPrivate, commits.commentsPrivate), control: control.origin,
-      viewer: fixture(repos.viewer, commits.viewer),
+      viewer: fixture(repos.viewer, commits.viewer), uninstalled: fixture(uninstalled, commits.uninstalled),
       ...(repos.visual && commits.visual ? { visual: fixture(repos.visual, commits.visual) } : {}),
     },
     close: () => control.close(),

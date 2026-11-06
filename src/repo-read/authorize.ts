@@ -19,7 +19,7 @@
  */
 import { cookieSite, sessionTokenCookie } from "@/viewer-ticket";
 import { constantTimeEqual } from "../../shared/constant-time";
-import { repoKey, type RepoPermissionSource, type RepoRecord, type RepoVisibilityEpochs, type RevocationEpochs } from "./access";
+import { repoKey, RepoAccessLimited, type RepoPermissionSource, type RepoRecord, type RepoVisibilityEpochs, type RevocationEpochs } from "./access";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "./capability";
 import { issueGrant, type RepoGrant } from "./grant";
 
@@ -42,7 +42,8 @@ export type Authorization =
   | { kind: "denied"; cookies: string[] }
   /** No signed-in reader: every view of a repository needs one (#354). */
   | { kind: "anonymous"; cookies: string[] }
-  | { kind: "unavailable"; retryAfter: string };
+  /** `status` 429 when the reader's lookups of unread repositories are limited (#354); absent: a plain 503. */
+  | { kind: "unavailable"; retryAfter: string; status?: 429 };
 
 export const CAPABILITY_TTL_SECONDS = 5 * 60;
 /** An asset ticket lives no longer than the cookie it was minted under; the frame renews it halfway (#293). */
@@ -201,7 +202,9 @@ export async function authorizeRepo(deps: AuthorizeDependencies, request: Reques
     if (!repo) return { kind: "denied", cookies };
     const cookie = await mintCookie(deps, request, repo, userId, epoch, session);
     return { kind: "granted", grant: issueGrant(repo, userId, epoch, deps.now() + CAPABILITY_TTL_SECONDS * 1000), cookies: [...cookies, cookie] };
-  } catch {
+  } catch (error) {
+    // The reader's allowance of unread repositories is spent: retryable, with the source's own wait.
+    if (error instanceof RepoAccessLimited) return { kind: "unavailable", retryAfter: String(error.retryAfterSeconds), status: 429 };
     // RepoAccessUnavailable, or a failing epoch store: unknown, so retryable.
     return { kind: "unavailable", retryAfter: "1" };
   }
