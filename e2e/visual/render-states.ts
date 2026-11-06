@@ -237,9 +237,11 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
   const docs = visualRepo(visual);
   const base = `/r/${docs.owner}/${docs.name}`;
   const frameHeading = (name: string) => repoContent(page).getByRole("heading", { level: 1, name });
+  // Every read needs a signed-in reader (#354): by default the seeded outsider, who may read public repositories only.
+  await signInSeeded(page.context(), origin(), visual.seedOwner, "outsider");
   switch (state) {
     case "not-found": {
-      await page.goto(`/r/${repositories.closed.owner}/${repositories.closed.name}`);
+      await page.goto(`/r/${repositories.closed.owner}/no-such-repository`);
       await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
       return rendered();
     }
@@ -340,7 +342,6 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
     case "search-empty":
     case "search-error":
     case "search-limited": {
-      await signInSeeded(page.context(), origin(), visual.seedOwner, "outsider");
       await page.goto(`/r/${open.owner}/${open.name}`);
       await expect(repoContent(page).getByRole("heading", { level: 1, name: "Open home" })).toBeVisible();
       if (state === "home") return rendered();
