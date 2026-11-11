@@ -160,10 +160,12 @@ describe("Worker environment validation", () => {
   });
 
   it("binds no upload bucket, no cron and no storage keys in any Wrangler environment", () => {
-    // Uploads and their nightly retention purge are gone (#286); repository snapshots belong to the ingest Worker.
+    // Uploads and their nightly retention purge are gone (#286). The only bucket is the ingest Worker's snapshot bucket,
+    // which production reads as REPO_CONTENT; the control Worker and ingest coordinators are bound by name, not storage.
     const wrangler = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").replace(/#.*$/gm, "");
     expect(wrangler).not.toMatch(/MINIO|S3_|ACCESS_KEY|SECRET_KEY|r2\.cloudflarestorage|r2\.dev/);
-    expect(wrangler).not.toMatch(/r2_buckets|STORAGE|triggers|crons/);
-    expect(wrangler).not.toMatch(/services|storage-faults|\[\[[^\]]*(?:service|durable)/i);
+    expect(wrangler).not.toMatch(/STORAGE|triggers|crons|storage-faults/);
+    expect([...wrangler.matchAll(/^binding = "([A-Z_]+)"\nbucket_name = "([^"]+)"/gm)].map(([, binding, bucket]) => `${binding}=${bucket}`)).toEqual(["REPO_CONTENT=rendro-ingest"]);
+    expect(wrangler.match(/\[\[r2_buckets\]\]/g)).toHaveLength(1);
   });
 });

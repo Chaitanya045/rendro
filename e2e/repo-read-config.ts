@@ -11,14 +11,30 @@ export const repoReadWorker = { access: "rendro-repo-access-fixture", accessConf
  */
 export const controlWorker = { name: "rendro-control-dev", env: "development", entrypoint: "RepoAccessService", epochs: "rendro-repo-epochs-test" };
 
+/** Top-level tables that bind production's resources and rate limits: the tests bind their own in their place. */
+const productionResourceTable = /^\[\[(?:r2_buckets|kv_namespaces|d1_databases|services|durable_objects\.bindings|ratelimits)\]\]\n(?:(?![[\n]).*\n)*/gm;
+
+/** Production's hostname, its route and its GitHub App sign-in, which a local test server does not have. */
+const productionIdentity = /^(?:routes|SITE_URL|GITHUB_APP_CLIENT_ID|GITHUB_APP_SLUG|AUTH_EMAIL_SIGN_IN) = .*\n/gm;
+
+/**
+ * A wrangler.toml without production's identity, resource bindings and rate limits, so tests run the production
+ * Worker on their own (`[env.*]` sections keep theirs).
+ */
+export function withoutProductionResources(config: string): string {
+  const envStart = config.search(/^\[env\./m);
+  const top = envStart === -1 ? config : config.slice(0, envStart);
+  return top.replace(productionResourceTable, "").replace(productionIdentity, "") + (envStart === -1 ? "" : config.slice(envStart));
+}
+
 /**
  * Adds the repository read path's bindings to a Worker configuration: snapshots in R2, revocation
  * epochs in KV, the repository search index in D1 and a control Worker as the permission source
  * (the #234 fixture unless `service` names another; the real control Worker is bound through its internal
- * entrypoint). Production configures none of them yet, so there every /r/ URL is a 404.
+ * entrypoint). Production's own bindings for these are removed first.
  */
 export function withRepoReadBindings(config: string, service = repoReadWorker.access): string {
-  return `${config}
+  return `${withoutProductionResources(config)}
 [[r2_buckets]]
 binding = "REPO_CONTENT"
 bucket_name = "rendro-repo-content-test"

@@ -97,7 +97,7 @@ pnpm preflight:prod --online   # owner only, with production credentials: also t
 | Control Worker `rendro-control` | `wrangler.control.toml`, top level | `pnpm exec wrangler deploy --config wrangler.control.toml` |
 | Convex | the production deployment (`--prod`) | `pnpm exec convex deploy` |
 
-Production is the top level of each wrangler file, as `pnpm run deploy` deploys it. The development Workers (`rendro-dev`, `rendro-ingest-dev`, `rendro-control-dev`) are each file's `[env.development]`, which the tests load. The top levels of `wrangler.ingest.toml` and `wrangler.control.toml` are production skeletons (#336): name, entry, Durable Objects, queues and cron, but no R2 bucket, D1 database or KV namespace. Until those are created and bound, the preflight reports them missing.
+Production is the top level of each wrangler file, as `pnpm run deploy` deploys it. The development Workers (`rendro-dev`, `rendro-ingest-dev`, `rendro-control-dev`) are each file's `[env.development]`, which the tests load. Production's resources were created and bound on 2026-11-11: the R2 bucket `rendro-ingest`, the D1 database `rendro-repo-search`, the KV namespace `rendro-repo-epochs`, and the queues `rendro-ingest` and `rendro-ingest-dlq`. The GitHub App is `rendro-app` (App ID 5707915), owned by the Rendro-app organization. The control Worker serves the webhook on the route `rendro.app/v1/github/webhook`.
 
 The preflight also blocks, in its own "Dependencies" section, while the installed Better Auth is older than 1.7.7 or `pnpm audit` ignores any advisory (#349). The audit exception for four Better Auth advisories (features Rendro does not enable) lives in `pnpm-workspace.yaml` under `auditConfig.ignoreGhsas`; it is dropped when the upgrade lands, and `tests/audit-exceptions.test.ts` fails if it outlives it, lists any other ID, or covers a plugin that is enabled.
 
@@ -157,7 +157,6 @@ pnpm run deploy
 
 `pnpm run deploy` runs `pnpm build:assets` before `wrangler deploy`; a bare `wrangler deploy` from a fresh checkout ships without the git-ignored bundles. For the development Workers, add `--env development` to each `wrangler secret put` and deploy: `pnpm run deploy --env development` for `rendro-dev` (`dev.rendro.app`), `pnpm exec wrangler deploy --config wrangler.ingest.toml --env development` for `rendro-ingest-dev`, and the same with `wrangler.control.toml` for `rendro-control-dev`. Without `--env`, the ingest and control commands target the production Workers. Use the explicit `run`: `pnpm deploy` is an unrelated pnpm command. See [Deploy Commands](TECHNICAL.md#deploy-commands) and [Environment Variables (Workers)](TECHNICAL.md#environment-variables-workers).
 
-`/r/` stays a 404 in production until the [checklist](#production-readiness-checklist) passes: the read path's bindings are not wired there yet.
 
 #### Keep the buckets private
 

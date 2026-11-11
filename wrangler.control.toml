@@ -6,13 +6,19 @@
 # docs/TECHNICAL.md ("Repository permission mirror"). tests/repo-access-workerd.test.ts and the
 # E2E suite run it on real workerd against a fake GitHub.
 #
-# The top level is the production Worker (#336), as in wrangler.toml. It is a skeleton: production's KV
-# namespace is not bound yet, so `pnpm preflight:prod` reports it missing until the owner creates it
-# (docs/SETUP.md, "Production readiness checklist"). Development and tests use [env.development].
+# The top level is the production Worker (#336), as in wrangler.toml; its resources were created on 2026-11-11
+# (`pnpm preflight:prod` checks them). Development and tests use [env.development].
 name = "rendro-control"
 main = "src/repo-access/entry.ts"
 compatibility_date = "2025-07-06"
 workers_dev = false
+
+# Only the webhook is public; the RepoAccessService entrypoint is reachable by service binding only.
+routes = [{ pattern = "rendro.app/v1/github/webhook", zone_name = "rendro.app" }]
+
+# Most work is calls to Convex and GitHub; run near them rather than near the reader.
+[placement]
+mode = "smart"
 
 # GITHUB_TOKEN_KEY seals stored user tokens (AES-GCM); GITHUB_WEBHOOK_SECRET verifies deliveries.
 # GITHUB_APP_CLIENT_ID/GITHUB_APP_CLIENT_SECRET (token refresh) and GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY (installation
@@ -20,7 +26,23 @@ workers_dev = false
 # CONVEX_URL (var) with CONVEX_INTERNAL_SECRET (secret) is optional: comments on repository docs (#254) then end
 # with the reader's epoch and an uninstall, not only when their grant expires.
 [secrets]
-required = ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET"]
+required = ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_APP_CLIENT_SECRET", "GITHUB_APP_PRIVATE_KEY", "CONVEX_INTERNAL_SECRET"]
+
+[vars]
+GITHUB_APP_ID = "5707915"
+GITHUB_APP_CLIENT_ID = "Iv23liYJQvRuXGKsT2Pm"
+CONVEX_URL = "https://limitless-wolverine-248.convex.cloud"
+
+# Shared with the serving Worker (its REPO_EPOCHS binding).
+[[kv_namespaces]]
+binding = "REPO_EPOCHS"
+id = "a3319594a05a46a49ee7330197d22635"
+
+# A confirmed removal purges the repository's cached content.
+[[durable_objects.bindings]]
+name = "REPO_INGEST"
+class_name = "RepoIngestCoordinator"
+script_name = "rendro-ingest"
 
 [observability.logs]
 enabled = true

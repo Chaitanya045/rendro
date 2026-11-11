@@ -426,10 +426,12 @@ describe("preflight command", () => {
       const text = log.mock.calls.map(([line]) => String(line)).join("\n");
       for (const worker of ["rendro", "rendro-ingest", "rendro-control"]) expect(text).toContain(`ok        Worker name: ${worker}\n`);
       expect(text).not.toMatch(/rendro-[a-z-]+-dev\b/);
-      // The ingest and control skeletons bind no production resource until the owner creates them.
-      expect(text).toContain("MISSING   INGEST_BUCKET (r2): ");
-      expect(text).toContain("MISSING   REPO_SEARCH (d1): The search index");
-      expect(text).toContain("MISSING   REPO_EPOCHS (kv): Revocation epochs, read by the serving Worker");
+      // Production's resources are created and bound in every Worker.
+      expect(text).toContain("ok        INGEST_BUCKET (r2): ");
+      expect(text).toContain("ok        REPO_CONTENT (r2): ");
+      expect(text).toContain("ok        REPO_EPOCHS (kv): ");
+      expect(text).toContain("ok        REPO_ACCESS (service): ");
+      expect(text).not.toMatch(/MISSING +(?=\S)(?!RUM_ANALYTICS|better-auth|pnpm audit)/);
       // The repository's own Better Auth and audit exceptions are checked (tests/audit-exceptions.test.ts pins their state).
       expect(text).toMatch(/(MISSING|ok) +better-auth \(dependency\): (installed \d+\.\d+\.\d+|not installed)/);
       expect(text).toMatch(/(MISSING|ok) +pnpm audit exceptions: /);
