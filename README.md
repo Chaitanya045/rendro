@@ -17,7 +17,7 @@ Rendro turns the Markdown in a GitHub repository into navigable documentation, w
 |---|---|
 | `/` | Landing page; a signed-in reader is redirected to `/home` |
 | `/sign-in`, `/sign-up`, `/forgot-password`, `/account/security` | Email accounts |
-| `/home` | The signed-in home: the account and how to open a repository |
+| `/home` | The signed-in home: the account, the reader's repositories, and a box that opens any public GitHub repository (`/home/open?repo=owner/repo`) |
 | `/r/{owner}/{repo}` | The default branch's documentation, for signed-in readers only (a visitor who is not signed in is sent to `/sign-in` and back); `/~{branch}` and `/@{commit}` select a branch or commit, `?doc=<path>` a page |
 
 ## Features

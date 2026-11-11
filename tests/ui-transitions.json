@@ -139,6 +139,10 @@
       "reason": "Signed cacheable subrequest for a public immutable snapshot object (#242): raw bytes or an empty 404, consumed only by the Worker's own read path, never an HTML page."
     },
     {
+      "route": "GET /home/open",
+      "reason": "The home's open-a-repository box (#354): a redirect to /r/{owner}/{repo}, or the home itself (covered by the /home edges) with the box's error."
+    },
+    {
       "route": "GET /favicon.svg",
       "reason": "Static browser code or favicon, not an HTML page."
     },
