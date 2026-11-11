@@ -234,7 +234,8 @@ describe("Chromium security header smoke", () => {
 
 describe("untrusted reload requests across viewer shells", () => {
   it.each([
-    ["public", publicPath, true, true],
+    // Signed in (every /r/ view needs a reader, #354); no notice, since a public repository has no comments (#353).
+    ["public", publicPath, true, false],
     ["private", privatePath, true, true],
   ] as const)("never navigates the %s shell without a parent gesture", async (_name, path, signedIn, offersNotice) => {
     const page = await pageFor(signedIn);

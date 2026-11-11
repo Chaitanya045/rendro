@@ -133,13 +133,14 @@ describe("the repository shell carries the one comments connection, for private 
 });
 
 describe("comment access mirrors read access", () => {
-  it("is the read path's plain 404 for a public repository, and calls Convex and the control Worker for nothing", async () => {
-    for (const headers of [{}, { cookie: sessions.reader }, { cookie: sessions.outsider }] as Array<Record<string, string>>) {
+  it("is the read path's plain 404 for a public repository, and records or asks nothing of comments", async () => {
+    // Both are signed in (every read needs a reader, #354) and may read the repository, so the read path may issue
+    // their read cookie; what must not happen is any comment grant, snapshot or moderation lookup.
+    for (const headers of [{ cookie: sessions.reader }, { cookie: sessions.outsider }]) {
       for (const query of ["", "?path=docs%2Fguide.md"]) {
         const response = await access(pub, headers, query);
         expectPlainNotFound(response);
         expect(await response.json()).toEqual({ error: "Not found" });
-        expect(response.headers.getSetCookie()).toEqual([]);
       }
     }
     fixture.access.moderate(users.reader, publicRepo.id, "admin");
