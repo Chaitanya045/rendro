@@ -71,7 +71,7 @@ describe("control Worker", () => {
     const tokens = github.signIn(reader);
     expect((await RepoAccessService.fetch(internal("/v1/accounts/link", { userId: "user-1", githubId: reader.id, login: "reader", tokens }), env)).status).toBe(204);
     expect(await source.authorize("user-1", "octo", "docs")).toEqual({ id: 801, owner: "octo", name: "docs", private: true, defaultBranch: "main" });
-    expect(await source.authorize(null, "octo", "docs")).toBeNull();
+    expect(await source.authorize("stranger", "octo", "docs")).toBeNull();
     expect((await RepoAccessService.fetch(internal("/v1/accounts/unlink", { userId: "user-1" }), env)).status).toBe(204);
     expect(await source.authorize("user-1", "octo", "docs")).toBeNull();
   });
@@ -169,13 +169,13 @@ describe("control Worker", () => {
     for (const key of [undefined, "short", SECRET]) {
       const { env, github } = environment({ GITHUB_TOKEN_KEY: key });
       const source = serviceRepoPermissions({ fetch: (request) => RepoAccessService.fetch(request, env) });
-      await expect(source.authorize(null, "octo", "docs")).rejects.toThrow("unavailable");
+      await expect(source.authorize("stranger", "octo", "docs")).rejects.toThrow("unavailable");
       expect((await worker.fetch(webhook(github, "membership", { action: "removed", member: { id: 1 }, installation: { id: 71 } }), env)).status).toBe(503);
       expect((await RepoAccessService.fetch(internal("/v1/accounts/unlink", { userId: "u" }), env)).status).toBe(503);
       await env.REPO_ACCESS_DIRECTORY.get("directory").fetch("https://directory/authorize", { method: "POST", body: "{}" });
     }
     const reused = environment({ GITHUB_TOKEN_KEY: "same-secret-0123456789abcdef012345", GITHUB_APP_CLIENT_SECRET: "same-secret-0123456789abcdef012345" });
-    await expect(directorySource(reused.env).authorize(null, "octo", "docs")).rejects.toThrow("unavailable");
+    await expect(directorySource(reused.env).authorize("stranger", "octo", "docs")).rejects.toThrow("unavailable");
     await reused.directory().alarm();
   });
 

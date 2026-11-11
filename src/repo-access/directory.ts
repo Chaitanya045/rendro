@@ -320,7 +320,7 @@ export class AccessDirectory {
     switch (new URL(request.url).pathname) {
       case "/authorize": {
         try {
-          const repo = await this.authorize(body.viewer as string | null, body.owner as string, body.name as string);
+          const repo = await this.authorize(body.viewer as string, body.owner as string, body.name as string);
           return repo ? Response.json({ repo }) : Response.json({}, { status: 404 });
         } catch {
           return Response.json({ error: "Unavailable" }, { status: 503 });
@@ -357,12 +357,12 @@ export class AccessDirectory {
   // ---- Authorization -------------------------------------------------------
 
   /**
-   * `RepoPermissionSource.authorize`: the repository when `viewer` may read it now, null otherwise,
+   * `RepoPermissionSource.authorize`: the repository when the signed-in `viewer` may read it now, null otherwise,
    * `RepoAccessUnavailable` when unknown. Every answer is decided from storage alone (`decide` awaits
    * nothing else, so no webhook can interleave). When the answer needs GitHub first, that work runs and
    * the decision is taken again from what storage holds afterwards, a bounded number of times.
    */
-  async authorize(viewer: string | null, owner: string, name: string): Promise<RepoRecord | null> {
+  async authorize(viewer: string, owner: string, name: string): Promise<RepoRecord | null> {
     try {
       // Set once GitHub could not confirm a public record: it grants until PUBLIC_CONFIRM_MAX_MS, still decided from storage.
       let unconfirmed = false;
@@ -370,7 +370,7 @@ export class AccessDirectory {
         const decision = await this.decide(viewer, owner, name, unconfirmed);
         if ("answer" in decision) return decision.answer;
         try {
-          await this.perform(viewer as string, decision.need);
+          await this.perform(viewer, decision.need);
         } catch (error) {
           const { need } = decision;
           if (need.kind !== "visibility" || this.deps.now() - (need.entry.confirmedAt ?? 0) >= PUBLIC_CONFIRM_MAX_MS) throw error;
@@ -433,14 +433,14 @@ export class AccessDirectory {
     return installation ? { entry, installation } : null;
   }
 
-  private async decide(viewer: string | null, owner: string, name: string, unconfirmed = false): Promise<Decision> {
+  private async decide(viewer: string, owner: string, name: string, unconfirmed = false): Promise<Decision> {
     const found = await this.lookup(owner, name);
     if (found) {
       const { entry, installation } = found;
       if (installation.check) return { need: { kind: "installation", entry: installation } };
       if (installation.state !== "active") return { answer: null };
-      // An anonymous reader is denied a repository recorded as private without asking GitHub: a check could only deny them too.
-      if (viewer === null && entry.private) return { answer: null };
+      // A reader with no GitHub tokens is denied a repository recorded as private without asking GitHub: a check could only deny them too.
+      if (entry.private && !(await this.user(viewer))?.tokens) return { answer: null };
       if (entry.check || entry.defaultBranch === null) return { need: { kind: "repo", entry } };
       if (!entry.private) {
         // A `privatized` delivery can be missed: public is only as current as GitHub's last word on it.
@@ -449,7 +449,6 @@ export class AccessDirectory {
         return { answer: repoRecord(entry) };
       }
     }
-    if (viewer === null) return { answer: null };
     const user = await this.user(viewer);
     if (!user?.tokens) return { answer: null };
     const mirror = await this.storage.get<Mirror>(`mirror:${viewer}`);

@@ -33,12 +33,12 @@ export class RepoAccessUnavailable extends Error {
 export interface RepoPermissionSource {
   /**
    * The repository `owner/name` (case-insensitive) when `viewer` may read it
-   * now, else null. `viewer` is a Rendro user ID, or null for an anonymous
-   * reader, who may read public repositories only. Null never distinguishes a
+   * now, else null. `viewer` is a signed-in Rendro user ID: every read needs
+   * one, public repositories included (#354). Null never distinguishes a
    * missing repository from a forbidden one. Throws `RepoAccessUnavailable`
    * when the answer is unknown.
    */
-  authorize(viewer: string | null, owner: string, name: string): Promise<RepoRecord | null>;
+  authorize(viewer: string, owner: string, name: string): Promise<RepoRecord | null>;
 }
 
 /**
@@ -184,7 +184,7 @@ export function repoAccessHandler(source: RepoPermissionSource): (request: Reque
       return json(400, { error: "Malformed request" });
     }
     const viewer = input?.viewer;
-    if (!(viewer === null || (typeof viewer === "string" && viewer.length > 0 && viewer.length <= 256))
+    if (!(typeof viewer === "string" && viewer.length > 0 && viewer.length <= 256)
       || !isOwnerLogin(input.owner) || !isRepoName(input.name)) return json(400, { error: "Malformed request" });
     try {
       const repo = await source.authorize(viewer, input.owner, input.name);

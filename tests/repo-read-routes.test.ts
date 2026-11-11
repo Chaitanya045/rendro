@@ -29,8 +29,14 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, "caches");
 });
 
+/** Every read needs a signed-in reader (#354): without a cookie of its own a request is the stranger's, a user with no access to the private repository. */
 function get(path: string, headers: Record<string, string> = {}, origin = "https://rendro.test", method = "GET") {
-  return app.request(`${origin}${path}`, { headers, method }, fixture.env, fixture.ctx);
+  return app.request(`${origin}${path}`, { headers: { cookie: sessionCookies.outsider, ...headers }, method }, fixture.env, fixture.ctx);
+}
+
+/** A request with no session at all. */
+function getAnonymous(path: string, headers: Record<string, string> = {}, method = "GET") {
+  return app.request(`https://rendro.test${path}`, { headers, method }, fixture.env, fixture.ctx);
 }
 
 const pub = `/r/${publicRepo.owner}/${publicRepo.name}`;
@@ -83,7 +89,7 @@ function expectPlainNotFound(response: Response) {
 }
 
 describe("public repositories", () => {
-  it("serves the shell for the default branch without a cookie, pinned to the served commit", async () => {
+  it("serves the shell for the default branch to a signed-in reader, pinned to the served commit", async () => {
     const response = await get(pub);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
@@ -92,15 +98,36 @@ describe("public repositories", () => {
     expect(response.headers.get("Content-Security-Policy")).toMatch(/script-src 'self' 'nonce-[^']+' 'strict-dynamic'/);
     expect(response.headers.get("Speculation-Rules")).toBe('"/speculation-rules/repo.json"');
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
-    expect(setCookies(response)).toEqual([]);
+    expect(setCookies(response)).toHaveLength(1);
+    expect(setCookies(response)[0]).toMatch(/^__Host-rendro-repo\.501=v1\./);
     const html = await response.text();
     expect(html).toContain(`data-document-base="${pub}"`);
     expect(html).toContain(`data-frame-base="${pub}/@${fixture.commits.public}"`);
     expect(html).toContain('window.RENDRO_INITIAL_DOC="public-docs/docs/index.md"');
     expect(html).toContain("Copy link");
-    expect(html).not.toContain('data-viewer="parent"');
-    // Anonymous public reads never reach the session.
-    expect(sessionLookups).toEqual([]);
+    // A public shell renews tickets like a private one: its frame's images carry them (#354).
+    expect(html).toContain('data-viewer="parent"');
+    expect(sessionLookups).toEqual(["outsider-token.sig"]);
+  });
+
+  it("sends an anonymous navigation to sign in and back, and answers every other anonymous request with the plain 404", async () => {
+    const commit = fixture.commits.public;
+    const reads = fixture.bucket.ops.get;
+    const shell = await getAnonymous(`${pub}/~main?doc=docs/guide/start.md`);
+    expect(shell.status).toBe(302);
+    expect(shell.headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent(`${pub}/~main?doc=docs/guide/start.md`)}`);
+    expect(shell.headers.get("Cache-Control")).toBe("private, no-store");
+    // The same answer for a repository that does not exist: nothing about it leaks.
+    expect((await getAnonymous("/r/octo/no-such-repo")).headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent("/r/octo/no-such-repo")}`);
+    for (const path of [`${pub}/@${commit}/files/docs/index.md`, `${pub}/files/docs/index.md`, `${pub}/@${commit}/files/docs/img/logo.png`,
+      `${pub}/tree?dir=`, `${pub}/@${commit}/tree?dir=`, `${pub}/search?q=home`, `${pub}/@${commit}/viewer-ticket?manifestKey=${commit}`]) {
+      expectPlainNotFound(await getAnonymous(path));
+    }
+    // A retired or unknown session is anonymous too, and a junk repository cookie changes nothing.
+    expect((await getAnonymous(pub, { cookie: "better-auth.session_token=gone.sig; __Host-rendro-repo.501=junk" })).status).toBe(302);
+    // Nothing was looked up or read for any of them.
+    expect(fixture.access.calls.authorize).toEqual([]);
+    expect(fixture.bucket.ops.get).toBe(reads);
   });
 
   it("serves same-origin speculation rules the shell can point at", async () => {
@@ -134,11 +161,12 @@ describe("public repositories", () => {
     expect(response.headers.get("Content-Type")).toMatch(/^text\/html/);
   });
 
-  it("serves a commit-pinned document frame as immutable public HTML with links relative to the page", async () => {
+  it("serves a commit-pinned document frame for a public repository as private HTML with ticketed images, links relative to the page and no validator", async () => {
     const path = `${pub}/@${fixture.commits.public}/files/docs/index.md`;
     const response = await get(path);
     expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    // Never `public`: every read needs a signed-in reader (#354).
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=300");
     expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(response.headers.get("Content-Security-Policy")).toBe(
       "sandbox allow-scripts allow-popups; default-src 'none'; script-src https://rendro.test/private-viewer.js; "
@@ -147,31 +175,33 @@ describe("public repositories", () => {
     expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
     expect(response.headers.get("Cross-Origin-Opener-Policy")).toBeNull();
     expect(response.headers.get("Accept-Ranges")).toBe("none");
-    const etag = response.headers.get("ETag") as string;
-    expect(etag).toMatch(/^"page-render\/v\d+\/markdown\/[0-9a-f]{40}\/[0-9a-f]{32}-f\d+\.v\d+\.c\d+\.[0-9a-f]{10}"$/);
+    // It embeds this reader's asset ticket, which a revalidated copy would keep past its expiry.
+    expect(response.headers.get("ETag")).toBeNull();
     const html = await response.text();
     expect(html).toContain('<h1 id="user-content-home">Home</h1>');
     expect(html).toContain('<a href="guide/start.md">guide</a>');
-    expect(html).toContain('<img src="img/logo.png" alt="Logo"');
+    const prefix = ticketPrefix(html);
+    expect(prefix).toMatch(new RegExp(`^${pub}/@${fixture.commits.public}/view/v1\\.[\\w-]+\\.[\\w-]+/files/$`));
+    expect(html).toContain(`<img src="${prefix}docs/img/logo.png" alt="Logo"`);
     expect(html).toContain('class="markdown-alert markdown-alert-note"');
     expect(html).toContain('data-viewer="navigation"');
     // Comments exist on private repositories only (#353): a public frame carries no widget, no configuration, no policy for one.
     expect(html).not.toContain("commentor");
     expect(html).not.toContain("<base");
-    expect(html).not.toContain('data-viewer="frame"');
-
-    const reads = fixture.bucket.ops.get;
-    const revalidated = await get(path, { "If-None-Match": etag });
-    expect(revalidated.status).toBe(304);
-    expect(fixture.bucket.ops.get).toBe(reads);
+    expect(html).toContain('data-viewer="frame"');
+    // The ticket serves the image to the cookie-less sandbox, and nothing else.
+    const image = await getAnonymous(`${prefix}docs/img/logo.png`);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("Cache-Control")).toBe("private, max-age=300");
+    expectPlainNotFound(await getAnonymous(`${prefix}docs/index.md`));
   });
 
   it("serves branch URLs with a short freshness window, an ETag and stale-if-error", async () => {
     for (const path of [`${pub}/files/docs/index.md`, `${pub}/~main/files/docs/index.md`]) {
       const response = await get(path);
       expect(response.status).toBe(200);
-      expect(response.headers.get("Cache-Control")).toBe("public, max-age=10, stale-if-error=86400");
-      expect(response.headers.get("ETag")).toMatch(/^"page-/);
+      expect(response.headers.get("Cache-Control")).toBe("private, max-age=10, stale-if-error=86400");
+      expect(response.headers.get("ETag")).toBeNull();
     }
     expectPlainNotFound(await get(`${pub}/~gone/files/docs/index.md`));
   });
@@ -192,7 +222,7 @@ describe("public repositories", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/png");
     expect(response.headers.get("Content-Security-Policy")).toBe("default-src 'none'; sandbox; frame-ancestors 'self'");
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=300");
     expect(response.headers.get("ETag")).toMatch(/^"git-[0-9a-f]{40}"$/);
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8]));
     const ranged = await get(path, { Range: "bytes=4-5" });
@@ -216,7 +246,7 @@ describe("public repositories", () => {
   it("serves sidebar directory pages with titles, pinned and branch-addressed", async () => {
     const tree = (dir: string, extra = "") => get(`${pub}/@${fixture.commits.public}/tree?dir=${encodeURIComponent(dir)}${extra}`);
     const root = await tree("");
-    expect(root.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    expect(root.headers.get("Cache-Control")).toBe("private, max-age=300");
     expect(root.headers.get("ETag")).toBe(`"tree-${fixture.commits.public}-r${RENDERER_VERSION}"`);
     expect(await root.json()).toEqual({ children: [{ name: "docs", type: "folder", title: "Docs" }], cursor: null });
     expect(await (await tree("docs/")).json()).toEqual({
@@ -238,20 +268,38 @@ describe("public repositories", () => {
       expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     }
     const branch = await get(`${pub}/tree?dir=`);
-    expect(branch.headers.get("Cache-Control")).toBe("public, max-age=10, stale-if-error=86400");
+    expect(branch.headers.get("Cache-Control")).toBe("private, max-age=10, stale-if-error=86400");
   });
 
-  it("issues no tickets for public repositories", async () => {
-    expectPlainNotFound(await get(`${pub}/@${fixture.commits.public}/viewer-ticket?manifestKey=${fixture.commits.public}`));
+  it("renews tickets for a public repository's trusted shell, like a private one's", async () => {
+    const renewal = await get(`${pub}/@${fixture.commits.public}/viewer-ticket?manifestKey=${fixture.commits.public}`);
+    expect(renewal.status).toBe(200);
+    const { prefix } = await renewal.json() as { prefix: string };
+    expect((await getAnonymous(`${prefix}docs/img/logo.png`)).status).toBe(200);
+    expectPlainNotFound(await get(`${pub}/@${fixture.commits.public}/viewer-ticket?manifestKey=other`));
+    expectPlainNotFound(await getAnonymous(`${pub}/@${fixture.commits.public}/viewer-ticket?manifestKey=${fixture.commits.public}`));
+  });
+
+  it("never answers a reader with a public Cache-Control, a shared-cache directive or a validator that outlives a ticket", async () => {
+    const commit = fixture.commits.public;
+    for (const path of [pub, `${pub}/~main`, `${pub}/@${commit}`, `${pub}/files/docs/index.md`, `${pub}/@${commit}/files/docs/index.md`,
+      `${pub}/@${commit}/files/docs/img/logo.png`, `${pub}/@${commit}/tree?dir=`, `${pub}/tree?dir=`, `${pub}/@${commit}/viewer-ticket?manifestKey=${commit}`]) {
+      const response = await get(path);
+      expect(response.status, path).toBe(200);
+      const cache = response.headers.get("Cache-Control") ?? "";
+      expect(cache, path).toMatch(/^private\b/);
+      expect(cache, path).not.toMatch(/public|s-maxage/);
+    }
   });
 });
 
 describe("private repositories", () => {
-  it("answers anonymous readers with a plain 404 and remembers the denial briefly", async () => {
-    for (const path of [priv, `${priv}/@${fixture.commits.private}/files/docs/index.md`, `${priv}/tree?dir=`]) {
-      expectPlainNotFound(await get(path));
+  it("sends anonymous readers to sign in or answers the plain 404, and asks nobody", async () => {
+    expect((await getAnonymous(priv)).status).toBe(302);
+    for (const path of [`${priv}/@${fixture.commits.private}/files/docs/index.md`, `${priv}/tree?dir=`]) {
+      expectPlainNotFound(await getAnonymous(path));
     }
-    expect(fixture.access.calls.authorize).toEqual([{ viewer: null, repo: "octo/secret-docs" }]);
+    expect(fixture.access.calls.authorize).toEqual([]);
   });
 
   it("answers a signed-in reader without access with the same 404 as a missing repository", async () => {
@@ -267,7 +315,7 @@ describe("private repositories", () => {
     vi.stubEnv("SITE_URL", "https://rendro.test");
     const host = (cookie: string) => `__Host-${cookie}`;
     // Alone, an unprefixed (sibling-settable) or retired session cookie is anonymous and never looked up.
-    for (const cookie of [sessionCookies.reader, `__Secure-${sessionCookies.reader}`]) expectPlainNotFound(await get(priv, { cookie }));
+    for (const cookie of [sessionCookies.reader, `__Secure-${sessionCookies.reader}`]) expect((await get(priv, { cookie })).status).toBe(302);
     expect(sessionLookups).toEqual([]);
     // Beside a __Host- cookie, before or after it, the reader's unprefixed token is neither looked up nor granted.
     for (const cookie of [`${sessionCookies.reader}; ${host(sessionCookies.outsider)}`, `${host(sessionCookies.outsider)}; ${sessionCookies.reader}`]) {
@@ -344,8 +392,8 @@ describe("private repositories", () => {
   it("serves a ticket's images but answers every page under it with the plain 404 of an unknown path", async () => {
     const cookie = await signIn();
     const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
-    expect((await get(`${prefix}docs/img/logo.png`)).status).toBe(200);
-    expectPlainNotFound(await get(`${prefix}docs/img/missing.png`));
+    expect((await getAnonymous(`${prefix}docs/img/logo.png`)).status).toBe(200);
+    expectPlainNotFound(await getAnonymous(`${prefix}docs/img/missing.png`));
     // The reference: a page URL under /r/ that no route knows.
     const unknown = await get(`${priv}/@${fixture.commits.private}/no-such-route/docs/index.md`);
     expectPlainNotFound(unknown);
@@ -357,7 +405,7 @@ describe("private repositories", () => {
     // No cookie, the reader's own session and cookie, and another user's session.
     for (const headers of [{}, { cookie }, { cookie: sessionCookies.outsider }] as Array<Record<string, string>>) {
       for (const page of ["docs/index.md", "docs/guide/start.md", "docs/missing.md", "docs/INDEX.MD", "docs/page.html"]) {
-        const response = await get(`${prefix}${page}`, headers);
+        const response = await getAnonymous(`${prefix}${page}`, headers);
         expectPlainNotFound(response);
         expect(response.headers.get("Content-Type"), page).toBe(unknown.headers.get("Content-Type"));
         expect(withoutNonces(await response.text()), page).toBe(unknownBody);
@@ -375,21 +423,21 @@ describe("private repositories", () => {
     const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
     const opened = Date.now();
     vi.setSystemTime(opened + 299_000);
-    expect((await get(`${prefix}docs/img/logo.png`)).status).toBe(200);
+    expect((await getAnonymous(`${prefix}docs/img/logo.png`)).status).toBe(200);
     vi.setSystemTime(opened + 301_000);
-    expectPlainNotFound(await get(`${prefix}docs/img/logo.png`));
+    expectPlainNotFound(await getAnonymous(`${prefix}docs/img/logo.png`));
     // The cookie has lapsed too; the shell's renewal re-authorizes through the session and mints a fresh ticket.
     const renewal = await get(`${priv}/@${fixture.commits.private}/viewer-ticket?manifestKey=${fixture.commits.private}`, { cookie });
     expect(renewal.status).toBe(200);
     const renewed = (await renewal.json() as { prefix: string }).prefix;
     expect(renewed).not.toBe(prefix);
-    expect((await get(`${renewed}docs/img/logo.png`)).status).toBe(200);
+    expect((await getAnonymous(`${renewed}docs/img/logo.png`)).status).toBe(200);
   });
 
   it("serves private images through the ticket alone, privately for the ticket's lifetime, and refuses a tampered or foreign ticket before any read", async () => {
     const cookie = await signIn();
     const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
-    const image = await get(`${prefix}docs/img/logo.png`);
+    const image = await getAnonymous(`${prefix}docs/img/logo.png`);
     expect(image.status).toBe(200);
     expect(image.headers.get("Cache-Control")).toBe("private, max-age=300");
     expect(image.headers.get("Content-Type")).toBe("image/png");
@@ -405,9 +453,9 @@ describe("private repositories", () => {
       `${priv}/@${fixture.commits.private}/view/${tampered}/files/docs/img/logo.png`,
       `${priv}/@${other}/view/${ticket}/files/docs/img/logo.png`,
       `${pub}/@${fixture.commits.public}/view/${ticket}/files/docs/img/logo.png`,
-    ]) expectPlainNotFound(await get(path));
+    ]) expectPlainNotFound(await getAnonymous(path));
     // A probe of a private object's edge cache key is an ordinary unknown URL.
-    expectPlainNotFound(await get(`/__repo-cache/v1/gh/v1/repo/${privateRepo.id}/snapshot/${fixture.commits.private}/r${RENDERER_VERSION}/manifest.json`));
+    expectPlainNotFound(await getAnonymous(`/__repo-cache/v1/gh/v1/repo/${privateRepo.id}/snapshot/${fixture.commits.private}/r${RENDERER_VERSION}/manifest.json`));
     expect(edge.ops.match).toEqual([]);
     expect(fixture.bucket.ops.get).toBe(reads);
   });
@@ -418,7 +466,7 @@ describe("private repositories", () => {
     expect(renewal.status).toBe(200);
     expect(renewal.headers.get("Cache-Control")).toBe("private, no-store");
     const { prefix } = await renewal.json() as { prefix: string };
-    expect((await get(`${prefix}docs/img/logo.png`)).status).toBe(200);
+    expect((await getAnonymous(`${prefix}docs/img/logo.png`)).status).toBe(200);
     expectPlainNotFound(await get(`${priv}/@${fixture.commits.private}/viewer-ticket?manifestKey=other`, { cookie }));
     expectPlainNotFound(await get(`${priv}/@${fixture.commits.private}/viewer-ticket?manifestKey=${fixture.commits.private}`));
   });
@@ -438,16 +486,18 @@ describe("private repositories", () => {
     for (const [session, cookie] of cases) {
       const response = await get(priv, { cookie: session ? `${session}; ${cookie}` : cookie });
       if (session === sessionCookies.reader) expect(response.status).toBe(200);
+      else if (session === "") expect(response.status).toBe(302);
       else expectPlainNotFound(response);
       expect(setCookies(response)).toContain(`${cookie.slice(0, cookie.indexOf("="))}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure`);
     }
-    // Cookies for another repository are left alone.
+    // Cookies for another repository are left alone: the public repository's own cookie is minted, the private one's kept.
     const elsewhere = await get(`${pub}`, { cookie: `${sessionCookies.reader}; ${valid}` });
-    expect(setCookies(elsewhere)).toEqual([]);
-    // A junk cookie under a public repository's name is never cleared on a cacheable public response.
-    const junk = await get(`${pub}/@${fixture.commits.public}/files/docs/index.md`, { cookie: "__Host-rendro-repo.501=junk" });
-    expect(junk.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
-    expect(setCookies(junk)).toEqual([]);
+    expect(setCookies(elsewhere)).toHaveLength(1);
+    expect(setCookies(elsewhere)[0]).toMatch(/^__Host-rendro-repo\.501=v1\./);
+    // A junk cookie under a public repository's name is cleared like any other (every response is private now).
+    const junk = await get(pub, { cookie: `${sessionCookies.outsider}; __Host-rendro-repo.501=junk` });
+    expect(junk.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(setCookies(junk)).toContain("__Host-rendro-repo.501=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure");
   });
 
   it("accepts only host-only cookies over HTTPS and only unprefixed ones over local HTTP", async () => {
@@ -493,7 +543,7 @@ describe("private repositories", () => {
     const cookie = await signIn();
     const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
     fixture.access.revoke(users.reader, privateRepo.id);
-    expectPlainNotFound(await get(`${prefix}docs/img/logo.png`));
+    expectPlainNotFound(await getAnonymous(`${prefix}docs/img/logo.png`));
   });
 
   it("refreshes a cookie past half its life in the background and renews it on the next request", async () => {
@@ -705,7 +755,7 @@ describe("unusual snapshots", () => {
     const html = await (await get(`${base}/files/docs/badges.md`)).text();
     // A version-3 render is served as ingested: the proxy path stays absolute, the repo image already points at the page.
     expect(html).toContain(`<img src="${proxied}" alt="Badge">`);
-    expect(html).toContain('<img src="img/logo.png" alt="Logo">');
+    expect(html).toContain(`<img src="${ticketPrefix(html)}docs/img/logo.png" alt="Logo">`);
   });
 
   it("rewrites a version-2 render's repo-path links and images on the way out", async () => {
@@ -723,7 +773,7 @@ describe("unusual snapshots", () => {
     const html = await (await get(`${pub}/files/docs/badges.md`)).text();
     // The pre-#242 shim still rewrites `/repo/path` for snapshots the old renderer wrote.
     expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
-    expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo">');
+    expect(html).toContain(`<img src="${ticketPrefix(html)}docs/img/logo.png" alt="Logo">`);
     // An external image stays on its verified signed proxy path, even under a repository folder named `img`.
     expect(html).toContain(`<img src="${proxied}" alt="Badge">`);
   });
@@ -745,7 +795,7 @@ describe("first views enqueue the ingest", () => {
 
   /** Lets the request reach the coordinator before the test answers it. */
   async function untilEnqueued(coordinator: FakeIngestCoordinator) {
-    for (let spins = 0; spins < 1000 && coordinator.calls.length === 0; spins += 1) await Promise.resolve();
+    for (let spins = 0; spins < 3000 && coordinator.calls.length === 0; spins += 1) await new Promise(resolve => setImmediate(resolve));
     expect(coordinator.calls).toEqual([{
       repo: { id: freshRepo.id, owner: freshRepo.owner, name: freshRepo.name, private: freshRepo.private, installationId: null },
       branch: "main",
@@ -791,8 +841,13 @@ describe("first views enqueue the ingest", () => {
     await untilEnqueued(coordinator);
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
+    // The poll joins the same flight and waits in its own window: no second call lands. Its window timer is how the test knows it is waiting.
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const windows = () => timers.mock.calls.filter(call => call[1] === PREPARE_WINDOW_MS).length;
+    const before = windows();
     const second = get(fresh);
-    await Promise.resolve(); // the poll joins the same flight: no second call lands
+    for (let spins = 0; spins < 5000 && windows() === before; spins += 1) await new Promise(resolve => setImmediate(resolve));
+    expect(windows()).toBeGreaterThan(before);
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await second).headers.get(READINESS_HEADER)).toBe("preparing");
     expect(coordinator.calls).toHaveLength(1);
@@ -860,7 +915,7 @@ describe("first views enqueue the ingest", () => {
     fixture.env.FIRST_VIEW_LIMIT = new FakeRateLimiter();
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     const first = get(`${fresh}/~preview`);
-    for (let spins = 0; spins < 1000 && coordinator.calls.length === 0; spins += 1) await Promise.resolve();
+    for (let spins = 0; spins < 3000 && coordinator.calls.length === 0; spins += 1) await new Promise(resolve => setImmediate(resolve));
     expect(coordinator.calls[0]).toMatchObject({ repo: { id: freshRepo.id }, branch: "preview", defaultBranch: false });
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");

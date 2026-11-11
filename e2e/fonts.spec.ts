@@ -167,7 +167,8 @@ test.describe("layout without the icon font", () => {
     });
   }
 
-  test("the overflow check detects the failure it guards against", async ({ page }) => {
+  test("the overflow check detects the failure it guards against", async ({ page, context, baseURL, seed }) => {
+    await signInSeeded(context, baseURL, seed, "outsider");
     await blockFonts(page);
     // The repository shell's toolbar icons are ligature names in a fallback font: only the icon box keeps them inside.
     const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;

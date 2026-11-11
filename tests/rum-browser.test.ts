@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import worker from "@/worker";
 import { isRumEvent, RUM_MAX_EVENTS, type RumEvent } from "@/rum/schema";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
-import { publicRepo, repoReadFixture } from "./helpers/repo-read-fixture";
+import { publicRepo, repoReadFixture, sessionCookies, stubSessions } from "./helpers/repo-read-fixture";
 import { SqliteSearchD1 } from "./helpers/search-sqlite";
 import { shellAsset } from "./helpers/repo-shell";
 import { d1SearchIndex } from "@/search/d1";
@@ -46,6 +46,8 @@ beforeAll(async () => {
   await harness.start((request, response) => {
     const url = new URL(request.url ?? "/", harness.origin);
     const headers = new Headers(Object.entries(request.headers).flatMap(([name, value]) => typeof value === "string" ? [[name, value] as [string, string]] : []));
+    // Every read needs a signed-in reader (#354).
+    if (url.pathname.startsWith("/r/")) headers.set("cookie", sessionCookies.reader);
     void body(request).then(async bytes => {
       const env = {
         ...fixture.env, REPO_SEARCH: search,
@@ -64,6 +66,7 @@ beforeEach(async () => {
   points.length = 0;
   // The endpoint's same-origin check compares against the site the browser is on.
   process.env.SITE_URL = harness.origin;
+  stubSessions();
   fixture = await repoReadFixture();
   // An empty index: a search answers 200 with no results, which the shell reads (an unread body records no timing).
   search = new SqliteSearchD1();
