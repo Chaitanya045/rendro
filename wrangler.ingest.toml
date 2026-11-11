@@ -3,9 +3,8 @@
 # tests/ingest-workerd.test.ts runs it on real workerd against a fake GitHub.
 # Bindings are documented in docs/TECHNICAL.md ("Repository ingest orchestration").
 #
-# The top level is the production Worker (#336), as in wrangler.toml. It is a skeleton: production's R2
-# bucket and D1 database are not bound yet, so `pnpm preflight:prod` reports them missing until the owner
-# creates them (docs/SETUP.md, "Production readiness checklist"). Development and tests use [env.development].
+# The top level is the production Worker (#336), as in wrangler.toml; its resources were created on 2026-11-11
+# (`pnpm preflight:prod` checks them). Development and tests use [env.development].
 name = "rendro-ingest"
 main = "src/ingest/orchestrator/entry.ts"
 compatibility_date = "2025-07-06"
@@ -14,7 +13,19 @@ workers_dev = false
 # Signs image proxy URLs in rendered pages (#224); seals private-repository content (#263).
 # Both are the same values as the serving Worker's. REPO_CONTENT_KEY_PREVIOUS is optional (a key rotation).
 [secrets]
-required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"]
+required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY", "GITHUB_APP_PRIVATE_KEY"]
+
+[vars]
+GITHUB_APP_ID = "5707915"
+
+[[r2_buckets]]
+binding = "INGEST_BUCKET"
+bucket_name = "rendro-ingest"
+
+[[d1_databases]]
+binding = "REPO_SEARCH"
+database_name = "rendro-repo-search"
+database_id = "f00f4a20-0ba1-4c33-b184-d70e6487ceb2"
 
 [observability.logs]
 enabled = true

@@ -3,6 +3,9 @@ main = "src/worker.ts"
 compatibility_date = "2025-07-06"
 compatibility_flags = ["nodejs_compat"]
 
+# Production serves on the rendro.app Custom Domain (needed for the shared cache tier, TECHNICAL.md).
+routes = [{ pattern = "rendro.app", custom_domain = true }]
+
 [observability]
 enabled = true
 
@@ -27,6 +30,56 @@ run_worker_first = true
 
 [vars]
 NODE_ENV = "production"
+SITE_URL = "https://rendro.app"
+GITHUB_APP_CLIENT_ID = "Iv23liYJQvRuXGKsT2Pm"
+GITHUB_APP_SLUG = "rendro-app"
+# GitHub-only sign-in (the same value is set in Convex production).
+AUTH_EMAIL_SIGN_IN = "off"
+
+# Rendered repository snapshots: the ingest Worker's bucket (read only here).
+[[r2_buckets]]
+binding = "REPO_CONTENT"
+bucket_name = "rendro-ingest"
+
+# Revocation epochs the control Worker writes.
+[[kv_namespaces]]
+binding = "REPO_EPOCHS"
+id = "a3319594a05a46a49ee7330197d22635"
+
+# The permission source. Without the entrypoint every permission check is a 503.
+[[services]]
+binding = "REPO_ACCESS"
+service = "rendro-control"
+entrypoint = "RepoAccessService"
+
+[[d1_databases]]
+binding = "REPO_SEARCH"
+database_name = "rendro-repo-search"
+database_id = "f00f4a20-0ba1-4c33-b184-d70e6487ceb2"
+
+[[durable_objects.bindings]]
+name = "REPO_INGEST"
+class_name = "RepoIngestCoordinator"
+script_name = "rendro-ingest"
+
+# Rate limiters: same limits as development, namespace IDs unique in the account.
+[[ratelimits]]
+name = "RUM_LIMIT"
+namespace_id = "2821"
+simple = { limit = 60, period = 60 }
+
+[[ratelimits]]
+name = "FIRST_VIEW_LIMIT"
+namespace_id = "2942"
+simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "SEARCH_LIMIT"
+namespace_id = "2943"
+simple = { limit = 60, period = 60 }
+
+# RUM_ANALYTICS (Analytics Engine dataset "rendro_rum") is left out until Analytics Engine is enabled on the
+# account (`wrangler deploy` fails with code 10089 while it is off); /rum accepts and drops beacons meanwhile.
 
 # ── Dev environment (deployed from `development` branch) ──
 [env.development]
