@@ -343,13 +343,13 @@ async function onlineConvexLines(deps: Dependencies): Promise<Line[]> {
 }
 
 /**
- * Production waits for Better Auth >= 1.7.7 (#349): until then the audit carries a narrow exception (#347),
- * and an exception is a debt, not a pass.
+ * Production needs Better Auth >= 1.7.7 and an audit with no ignored advisory (#349). Both hold since the upgrade;
+ * the gate stays as a regression guard, because an exception is a debt, not a pass.
  */
 function dependencyLines(deps: Dependencies): Line[] {
   const version = deps.betterAuthVersion();
   const ignores = deps.auditIgnores();
-  const fix = `upgrade better-auth to >= ${FIXED_VERSION} once @convex-dev/better-auth supports it (#349), then remove auditConfig.ignoreGhsas from pnpm-workspace.yaml`;
+  const fix = `install better-auth >= ${FIXED_VERSION} (@convex-dev/better-auth 0.13 supports it) and remove every auditConfig ignore from pnpm-workspace.yaml (#349)`;
   return [
     isBeforeFix(version)
       ? { status: "missing", label: "better-auth (dependency)", detail: `${version === null ? "not installed" : `installed ${version}`}; production needs >= ${FIXED_VERSION}`, fix }

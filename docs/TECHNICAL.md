@@ -136,13 +136,13 @@ Development has no App, so it stays email-only, exactly as before. The App's set
 | A new GitHub account, no Rendro account with its address | A Rendro account is created, its email verified |
 | A Rendro account with the same address, verified here | GitHub is linked to it (`trustedProviders: ["github"]`, `requireLocalEmailVerified`) |
 | The same address, never verified here | Refused (`account_not_linked`): verify the email first |
-| `link-social` from a signed-in account whose address differs | Refused (`email_doesn't_match`, `allowDifferentEmails: false`) |
+| `link-social` from a signed-in account whose address differs | Refused (`email_does_not_match`, `allowDifferentEmails: false`) |
 | A GitHub account already linked to another Rendro account | Refused (`account_already_linked_to_different_user`) |
 | Unlinking the last sign-in method | Refused (`allowUnlinkingAll: false`) |
 
 **Tokens never stay in Convex.** Better Auth would store the user's access and refresh token on the account row. `withoutOAuthTokens` wraps the adapter (transactions included) and drops `accessToken`, `refreshToken` and `idToken` from every account write, keeping them for the request alone. The hand-off plugin's `onResponse` then seals the user ID, the GitHub ID and login and the tokens into one header of the callback's response (`x-rendro-github-hand-off`, `shared/github-hand-off.ts`): AES-256-GCM under a key HKDF-derived from `CONVEX_INTERNAL_SECRET` for this purpose alone, expiring after a minute. The serving Worker strips that header from every proxied response, whatever the path, and on the GitHub callback alone opens it and posts it to the control Worker's `/v1/accounts/link` through `REPO_ACCESS` (`src/github-hand-off.ts`), where the tokens are sealed at rest under `GITHUB_TOKEN_KEY` ([Tokens](#tokens)). If that call fails the reader is still signed in, without access to private repositories, and the next GitHub sign-in links again. Without the binding (development today) nothing is forwarded.
 
-**Unlinking GitHub** (`POST /api/auth/unlink-account` with `providerId: "github"`) is the serving Worker's to order: it asks the control Worker to forget the reader's tokens first (`/v1/accounts/unlink`), and forwards the unlink to Convex only once that succeeded; otherwise the answer is a retryable 503 and nothing is unlinked. A GitHub account is therefore never unlinked while its tokens still grant access. A refused unlink (the last method) leaves the tokens forgotten: the next GitHub sign-in restores them.
+**Unlinking GitHub** (`POST /api/auth/unlink-account` with `accountId`, the account's Better Auth row ID: since Better Auth 1.7 it names an account by that ID, not by provider) is the serving Worker's to order. It reads the reader's own accounts (`GET /api/auth/list-accounts`) to see whether that ID is their GitHub account; if it is, it asks the control Worker to forget the reader's tokens first (`/v1/accounts/unlink`), and forwards the unlink to Convex only once that succeeded. If the list cannot be read or the control Worker cannot drop the tokens, the answer is a retryable 503 and nothing is unlinked. Any other account (or one that is not the reader's) goes straight to Convex, which authorizes it. A GitHub account is therefore never unlinked while its tokens still grant access. A refused unlink (the last method) leaves the tokens forgotten: the next GitHub sign-in restores them.
 
 ### Session lifetime
 
@@ -158,7 +158,7 @@ prefixed and mixed-case names, and places the server-derived marker first.
 Missing, invalid, forged, replayed, or malformed client markers cannot change
 refresh or cookie persistence, including Worker reads and viewer-ticket
 authorization. Only endpoints that never resolve the caller's session (`/ok`,
-`/error`, `/sign-out`, and Convex JWKS/OpenID discovery) skip the plugin; a test
+`/error`, `/sign-out`, and Convex JWKS/OpenID discovery) skip the plugin (Better Auth's own sign-out reads the session once to find providers to end the login at, and writes nothing); a test
 enumerates every Better Auth endpoint to keep that list exact. The plugin runs
 after the read limiter and reuses its resolved session; it does not bypass rate
 limits. Password changes that revoke sessions carry the authenticated session's
@@ -830,7 +830,7 @@ The ingest and control Workers' settings are listed with their sections ([ingest
 
 | Workflow | Trigger | Runs |
 |---|---|---|
-| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | `verify` (`pnpm verify`, dependency audit; its one exception, four Better Auth advisories about plugins and adapters Rendro does not use, sits in `pnpm-workspace.yaml` and is guarded by `tests/audit-exceptions.test.ts`, [SETUP.md](SETUP.md#production-readiness-checklist), #349); `comrak-engine` (rebuilds the Markdown engine's WebAssembly from source and compares it with the committed bytes); `e2e-engine` (Playwright Test on workerd, two weighted shards per browser engine, `e2e (<engine> <i>/2)`, each with a duration guard) and its `e2e` gate and report; `visual (chromium baselines)` (`pnpm visual` in the pinned container); `a11y` (axe scans on Chromium, Firefox and WebKit); `coverage` (`pnpm coverage`, summary artifacts) |
+| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | `verify` (`pnpm verify`, dependency audit with no exceptions; `tests/audit-exceptions.test.ts` fails if one is added or Better Auth older than 1.7.7 is installed, [SETUP.md](SETUP.md#production-readiness-checklist), #349); `comrak-engine` (rebuilds the Markdown engine's WebAssembly from source and compares it with the committed bytes); `e2e-engine` (Playwright Test on workerd, two weighted shards per browser engine, `e2e (<engine> <i>/2)`, each with a duration guard) and its `e2e` gate and report; `visual (chromium baselines)` (`pnpm visual` in the pinned container); `a11y` (axe scans on Chromium, Firefox and WebKit); `coverage` (`pnpm coverage`, summary artifacts) |
 | `.github/workflows/r2-public-access.yml` | Daily cron, manual; dry run on pull requests touching it | `pnpm check:r2-public` ([R2 bucket privacy](#r2-bucket-privacy)); needs `CLOUDFLARE_ACCOUNT_ID` and a read-only R2 `CLOUDFLARE_API_TOKEN` |
 | `.github/workflows/stability.yml` | Nightly cron, manual | `coverage-twice` (two consecutive `taskset -c 0,1 pnpm coverage` runs, then per-test outcome and coverage-counter diffs) and `e2e-no-retries` (per engine and shard, `E2E_RETRIES=0`); read-only permissions, no secrets |
 

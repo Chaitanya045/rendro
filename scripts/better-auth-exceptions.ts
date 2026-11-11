@@ -1,24 +1,16 @@
 /**
- * The narrow `pnpm audit` exception for Better Auth (#347, #349) and what keeps it honest.
+ * What keeps `pnpm audit` free of exceptions (#347, #349).
  *
- * Better Auth < 1.7.7 carries four advisories about features Rendro does not enable. They are listed in
- * `pnpm-workspace.yaml` (`auditConfig.ignoreGhsas`) until `@convex-dev/better-auth` supports Better Auth >= 1.7.7.
- * `tests/audit-exceptions.test.ts` and `pnpm preflight:prod` both read this module, so the exception cannot be
- * widened, cannot cover an enabled feature, and cannot outlive the upgrade.
+ * Better Auth < 1.7.7 carries four advisories (Magic Link, OAuth Proxy, device authorization, the PostgreSQL rate
+ * limits). They were ignored, as narrow exceptions in `pnpm-workspace.yaml`, until `@convex-dev/better-auth` 0.13
+ * supported Better Auth 1.7. Since the upgrade there is none: `tests/audit-exceptions.test.ts` and
+ * `pnpm preflight:prod` both read this module, so a Better Auth older than the fix, or any ignored advisory, fails.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** The first Better Auth release that fixes every advisory below. */
+/** The first Better Auth release that fixes the four advisories above. */
 export const FIXED_VERSION = "1.7.7";
-/** Why each exception does not apply. The only IDs the audit may ignore. */
-export const AUDIT_EXCEPTIONS: Record<string, string> = {
-  "GHSA-965c-763c-88jm": "concerns the Magic Link plugin, which is not enabled",
-  "GHSA-r4xp-prcw-77qf": "concerns the OAuth Proxy plugin, which is not enabled",
-  "GHSA-q84f-53jg-9ppm": "concerns the device authorization plugin, which is not enabled",
-  "GHSA-44jh-23m7-hpcf": "concerns the drizzle and kysely adapters' PostgreSQL rate limits; Rendro uses the Convex adapter",
-};
-
 const root = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url));
 
 /** `major.minor.patch` of a version, ignoring any pre-release suffix; null when it is not one. */
