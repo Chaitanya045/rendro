@@ -7,6 +7,7 @@ import {
   betterAuth,
   type BetterAuthOptions,
 } from "better-auth/minimal";
+import type { BetterAuthPlugin } from "better-auth";
 import { sessionReadLimit } from "./sessionReadLimit";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
@@ -137,6 +138,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         "/send-verification-email": { window: 60 * 60, max: 5 },
       },
     },
+    // Typed as the plugin interface: the plugins' own endpoint types are too large for a declaration to carry.
     plugins: [
       sessionReadLimit((key) => {
         if (!("runMutation" in ctx)) throw new Error("Session HTTP reads require a mutation-capable context");
@@ -145,7 +147,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       sessionLifetime(),
       githubHandOff(capture, process.env.CONVEX_INTERNAL_SECRET),
       convex({ authConfig }),
-    ],
+    ] as BetterAuthPlugin[],
   } satisfies BetterAuthOptions;
 }
 

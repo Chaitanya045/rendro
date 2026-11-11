@@ -10,7 +10,7 @@ function signedIn(user: Partial<User> = { id: 'user-a', email: '<person>@example
 }
 
 describe('auth route rendering boundaries', () => {
-  it.each(['access_denied', 'state_mismatch', 'state_security_mismatch', 'state_not_found', 'invalid_state', 'unable_to_link_account', 'account_not_linked', 'account_already_linked_to_different_user', "email_doesn't_match", 'email_not_verified', '<unknown>'])('renders safe recovery for %s even with an existing session', async error => {
+  it.each(['access_denied', 'state_mismatch', 'state_security_mismatch', 'state_not_found', 'invalid_state', 'unable_to_link_account', 'account_not_linked', 'account_already_linked_to_different_user', "email_does_not_match", 'email_not_verified', '<unknown>'])('renders safe recovery for %s even with an existing session', async error => {
     const response = await signedIn().request(`/sign-in?error=${encodeURIComponent(error)}`);
     expect(response.status).toBe(200);
     const html = await response.text();

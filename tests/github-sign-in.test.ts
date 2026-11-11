@@ -100,7 +100,7 @@ async function world(options: { github?: boolean; email?: "on" | "off"; repoAcce
     return response.status === 200 ? await response.json() as { id: string; email: string } : null;
   }
   async function emailUser(email: string, emailVerified = true) {
-    const user = await context.internalAdapter.createUser({ name: "Reader", email, emailVerified });
+    const user = await context.internalAdapter.createUser({ name: "Reader", email, emailVerified }, { method: "email-password" });
     await context.internalAdapter.createAccount({ userId: user.id, accountId: user.id, providerId: "credential", password: await hashPassword(password) });
     return user;
   }
@@ -108,6 +108,11 @@ async function world(options: { github?: boolean; email?: "on" | "off"; repoAcce
     const jar = new Jar();
     expect((await post(jar, "/api/auth/sign-in/email", { email, password })).status).toBe(200);
     return jar;
+  }
+  /** The row ID Better Auth names one of the reader's accounts by (`unlink-account` takes it, not the provider). */
+  async function accountId(jar: Jar, providerId: string) {
+    const accounts = await (await request(jar, "/api/auth/list-accounts")).json() as Array<{ id: string; providerId: string }>;
+    return accounts.find(account => account.providerId === providerId)!.id;
   }
   const githubAccounts = () => backend.query(components.betterAuth.adapter.findMany, { model: "account", where: [{ field: "providerId", value: "github" }], paginationOpts: { cursor: null, numItems: 100 } })
     .then((result: { page: Array<Record<string, unknown>> }) => result.page);
@@ -119,7 +124,7 @@ async function world(options: { github?: boolean; email?: "on" | "off"; repoAcce
     }
     return JSON.stringify(rows);
   }
-  return { github, context, calls, accounts, request, post, start, finish, signIn, whoami, emailUser, signInWithPassword, githubAccounts, everything };
+  return { github, context, calls, accounts, accountId, request, post, start, finish, signIn, whoami, emailUser, signInWithPassword, githubAccounts, everything };
 }
 
 describe("GitHub sign-in (#338)", () => {
@@ -266,7 +271,7 @@ describe("GitHub sign-in (#338)", () => {
     const jar = await w.signInWithPassword("member@example.test");
     const other = w.github.user("octo-other", 7005, verified("someone-else@example.test"));
     const refused = await w.finish(jar, await w.start(jar, "/api/auth/link-social", `${origin}/account/security`), other);
-    expect(refused.headers.get("location")).toBe("/sign-in?error=email_doesn't_match");
+    expect(refused.headers.get("location")).toBe("/sign-in?error=email_does_not_match");
     expect(await w.githubAccounts()).toEqual([]);
     expect(w.calls).toEqual([]);
     const same = w.github.user("octo-member", 7006, verified("member@example.test"));
@@ -322,7 +327,7 @@ describe("unlinking GitHub (#338)", () => {
     await w.emailUser("member@example.test");
     const { jar } = await w.signIn(person);
     const reader = await w.whoami(jar);
-    const response = await w.post(jar, "/api/auth/unlink-account", { providerId: "github" });
+    const response = await w.post(jar, "/api/auth/unlink-account", { accountId: await w.accountId(jar, "github") });
     expect(response.status).toBe(200);
     expect(w.calls.at(-1)).toEqual({ path: "/v1/accounts/unlink", body: { userId: reader!.id } });
     expect(await w.githubAccounts()).toEqual([]);
@@ -332,7 +337,7 @@ describe("unlinking GitHub (#338)", () => {
     const w = await world();
     const person = w.github.user("octo-only", 7008, verified("only@example.test"));
     const { jar } = await w.signIn(person);
-    const response = await w.post(jar, "/api/auth/unlink-account", { providerId: "github" });
+    const response = await w.post(jar, "/api/auth/unlink-account", { accountId: await w.accountId(jar, "github") });
     expect(response.status).toBe(400);
     expect(await w.githubAccounts()).toHaveLength(1);
     expect(await w.whoami(jar)).not.toBeNull();
@@ -343,23 +348,60 @@ describe("unlinking GitHub (#338)", () => {
     const person = w.github.user("octo-member", 7006, verified("member@example.test"));
     await w.emailUser("member@example.test");
     const { jar } = await w.signIn(person);
+    const accountId = await w.accountId(jar, "github");
     w.accounts.status = 503;
-    const response = await w.post(jar, "/api/auth/unlink-account", { providerId: "github" });
+    const response = await w.post(jar, "/api/auth/unlink-account", { accountId });
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("5");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await w.githubAccounts()).toHaveLength(1);
   });
 
+  it("unlinks nothing when the reader's accounts cannot be listed to tell whose tokens to drop", async () => {
+    const w = await world();
+    const person = w.github.user("octo-member", 7006, verified("member@example.test"));
+    await w.emailUser("member@example.test");
+    const { jar } = await w.signIn(person);
+    const accountId = await w.accountId(jar, "github");
+    const calls = w.calls.length;
+    const real = fetch;
+    for (const listing of [() => new Response("unavailable", { status: 500 }), () => new Response("not json"), () => Response.json({ not: "a list" })]) {
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        return new URL(input instanceof Request ? input.url : String(input)).pathname === "/api/auth/list-accounts" ? listing() : real(input, init);
+      }));
+      const response = await w.post(jar, "/api/auth/unlink-account", { accountId });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("5");
+    }
+    expect(w.calls).toHaveLength(calls);
+    expect(await w.githubAccounts()).toHaveLength(1);
+  });
+
   it("leaves other unlinks, malformed bodies and anonymous callers to Convex", async () => {
     const w = await world();
     const jar = new Jar();
-    expect((await w.post(jar, "/api/auth/unlink-account", { providerId: "github" })).status).toBe(401);
+    expect((await w.post(jar, "/api/auth/unlink-account", { accountId: "anything" })).status).toBe(401);
     expect((await w.request(jar, "/api/auth/unlink-account", { method: "POST", headers: { "content-type": "application/json" }, body: "{" })).status).toBeGreaterThanOrEqual(400);
     await w.emailUser("member@example.test");
     const signedIn = await w.signInWithPassword("member@example.test");
-    expect((await w.post(signedIn, "/api/auth/unlink-account", { providerId: "credential" })).status).toBe(400);
+    // The retired provider selector, no selector at all, and an account that is not the reader's own.
+    for (const body of [{ providerId: "github" }, {}, null, { accountId: 7 }, { accountId: "someone-elses-account" }]) {
+      expect((await w.post(signedIn, "/api/auth/unlink-account", body)).status).toBe(400);
+    }
+    expect((await w.post(signedIn, "/api/auth/unlink-account", { accountId: await w.accountId(signedIn, "credential") })).status).toBe(400);
     expect(w.calls).toEqual([]);
+  });
+
+  it("drops no tokens when the reader unlinks an account that is not GitHub", async () => {
+    const w = await world();
+    const person = w.github.user("octo-member", 7006, verified("member@example.test"));
+    await w.emailUser("member@example.test");
+    const { jar } = await w.signIn(person);
+    const calls = w.calls.length;
+    const response = await w.post(jar, "/api/auth/unlink-account", { accountId: await w.accountId(jar, "credential") });
+    expect(response.status).toBe(200);
+    expect(w.calls).toHaveLength(calls);
+    expect(await w.githubAccounts()).toHaveLength(1);
   });
 });
 

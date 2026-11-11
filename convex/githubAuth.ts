@@ -1,4 +1,5 @@
 import type { BetterAuthPlugin, DBAdapter, DBTransactionAdapter } from "better-auth";
+import type { GithubProfile } from "better-auth/social-providers";
 import { GITHUB_HAND_OFF_HEADER, sealHandOff, type GitHubHandOff, type HandOffTokens } from "../shared/github-hand-off";
 
 /**
@@ -63,7 +64,7 @@ interface GitHubEmail { email?: unknown; primary?: unknown; verified?: unknown }
  * The provider's user info, from `GET /user` and `GET /user/emails` (the App's "Email addresses" read
  * permission). Only an address GitHub verified counts, the primary one first: Better Auth trusts GitHub
  * for linking (`trustedProviders`), so an unverified address must never reach it. Without one the email
- * is absent, and Better Auth refuses the sign-in (`email_not_found`) or the link (`email_doesn't_match`).
+ * is absent, and Better Auth refuses the sign-in (`email_not_found`) or the link (`email_does_not_match`).
  */
 export function githubUserInfo(capture: HandOffCapture) {
   return async (token: { accessToken?: string }) => {
@@ -76,14 +77,15 @@ export function githubUserInfo(capture: HandOffCapture) {
     const email = (verified.find((entry) => entry.primary === true) ?? verified[0])?.email;
     capture.identity = { githubId: user.id as number, login: user.login };
     return {
+      // The account key is the profile's own `id` (`data`, below): Better Auth 1.7 takes it from there.
       user: {
-        id: String(user.id),
         name: typeof user.name === "string" && user.name.trim() ? user.name : user.login,
         email,
         image: typeof user.avatar_url === "string" ? user.avatar_url : undefined,
         emailVerified: email !== undefined,
       },
-      data: profile,
+      // `id` and `login` were validated above; the rest of the profile is only passed through.
+      data: profile as GithubProfile,
     };
   };
 }
@@ -143,7 +145,7 @@ export function githubHandOff(capture: HandOffCapture, secret: string | undefine
   return {
     id: "rendro-github-hand-off",
     async onResponse(response, ctx) {
-      const handOff = await pendingHandOff(capture, (githubId) => ctx.internalAdapter.findAccountByProviderId(String(githubId), "github"));
+      const handOff = await pendingHandOff(capture, (githubId) => ctx.internalAdapter.findAccountByKey({ providerId: "github", accountId: String(githubId) }));
       Object.assign(capture, handOffCapture());
       if (!handOff || !secret) return;
       const headers = new Headers(response.headers);
