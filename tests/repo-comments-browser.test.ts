@@ -5,7 +5,8 @@ import { RENDERER_VERSION } from "@/ingest/limits";
 import { manifestKey } from "@/ingest/orchestrator/keys";
 import worker from "@/worker";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
-import { publicRepo, repoReadFixture } from "./helpers/repo-read-fixture";
+import { TEST_CONTENT_SEALER } from "./helpers/ingest-fixture";
+import { privateRepo, repoReadFixture, sessionCookies, stubSessions } from "./helpers/repo-read-fixture";
 
 /*
  * Comments on repository docs in Chromium (#254). The document frame is the real Worker's, with its real policy
@@ -38,14 +39,16 @@ async function send(response: ServerResponse, reply: Response) {
   response.end(Buffer.from(await reply.arrayBuffer()));
 }
 
-/** Adds the guide page (known blob, known headings) to the public repository's snapshot. */
+/** Adds the guide page (known blob, known headings) to the private repository's snapshot (comments exist there only, #353). */
 async function addGuide(commit: string) {
   const render = `render/v${RENDERER_VERSION}/markdown/${BLOB}/${"e".repeat(32)}`;
-  await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({ title: "Guide", headings: [], html })));
-  const key = manifestKey(publicRepo.id, commit, RENDERER_VERSION);
-  const manifest = fixture.bucket.json<{ files: Record<string, unknown> }>(key) as { files: Record<string, unknown> };
+  // A private repository's objects are sealed, as ingest writes them.
+  const renderKey = `gh/v1/repo/${privateRepo.id}/${render}`;
+  await fixture.bucket.put(renderKey, await TEST_CONTENT_SEALER.seal({ repoId: privateRepo.id, key: renderKey }, new TextEncoder().encode(JSON.stringify({ title: "Guide", headings: [], html }))));
+  const key = manifestKey(privateRepo.id, commit, RENDERER_VERSION);
+  const manifest = JSON.parse(new TextDecoder().decode(await TEST_CONTENT_SEALER.open({ repoId: privateRepo.id, key }, fixture.bucket.objects.get(key)!.bytes))) as { files: Record<string, unknown> };
   manifest.files[PAGE] = { sha: BLOB, size: 1, render, title: "Guide" };
-  await fixture.bucket.put(key, new TextEncoder().encode(JSON.stringify(manifest)));
+  await fixture.bucket.put(key, await TEST_CONTENT_SEALER.seal({ repoId: privateRepo.id, key }, new TextEncoder().encode(JSON.stringify(manifest))));
 }
 
 const parent = `<!doctype html><meta charset="utf-8">
@@ -85,18 +88,19 @@ beforeAll(async () => {
       response.end(`<!doctype html><meta charset="utf-8"><body>${body}<script src="/commentor.js" data-commentor-config="${config.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"></script></body>`);
       return;
     }
-    void Promise.resolve(worker.request(url.href, {}, fixture.env, fixture.ctx)).then(reply => send(response, reply));
+    void Promise.resolve(worker.request(url.href, { headers: { cookie: sessionCookies.reader } }, fixture.env, fixture.ctx)).then(reply => send(response, reply));
   }, assets);
 });
 
 beforeEach(async () => {
   fixture = await repoReadFixture();
-  await addGuide(fixture.commits.public);
+  stubSessions();
+  await addGuide(fixture.commits.private);
 });
 
 type Opened = { page: Page; frame: Frame };
 
-async function open(canWrite: boolean, path = `/r/${publicRepo.owner}/${publicRepo.name}/@${fixture.commits.public}/files/${PAGE}`): Promise<Opened> {
+async function open(canWrite: boolean, path = `/r/${privateRepo.owner}/${privateRepo.name}/@${fixture.commits.private}/files/${PAGE}`): Promise<Opened> {
   const page = await harness.newPage();
   await page.addInitScript(() => {
     const store = window as unknown as { violations: string[] };
@@ -301,7 +305,7 @@ describe("comments in a repository document frame", () => {
 });
 
 describe("the widget's configuration attribute", () => {
-  const repo = { transport: "parent", repoId: publicRepo.id, documentPath: PAGE, blobSha: BLOB };
+  const repo = { transport: "parent", repoId: privateRepo.id, documentPath: PAGE, blobSha: BLOB };
   const bare = (config: string, article = false) => open(true, `/bare?article=${article ? 1 : 0}&config=${encodeURIComponent(config)}`);
   const started = (opened: Opened) => opened.frame.evaluate(() => Boolean(document.getElementById("commentor-host")));
 

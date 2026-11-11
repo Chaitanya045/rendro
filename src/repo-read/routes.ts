@@ -30,7 +30,7 @@ import {
   authorizeRepo, authorizeTicket, CAPABILITY_TTL_SECONDS, mintTicket, TICKET_TTL_SECONDS, type Authorization, type AuthorizeDependencies,
 } from "./authorize";
 import {
-  COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, moderatorDecision, recordModerator,
+  COMMENT_GRANT_MIN_MS, commentAccess, commentReader, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, moderatorDecision, recordModerator,
   type CommentGrants, type CommentSnapshots, type ModerationSources,
 } from "./comments";
 import { rateLimiter, takeToken, type RateLimiter } from "./admission";
@@ -86,7 +86,7 @@ interface Services {
   searchLimit: RateLimiter | null;
   /** Where comment grants are recorded (#254). */
   comments: CommentGrants;
-  /** The control Worker's word on who moderates a repository's comments, and the epochs a role is decided under (#259). */
+  /** The control Worker's word on who moderates a private repository's comments (#259). */
   moderation: ModerationSources;
   /** Where the shell's first page of a document's threads comes from (#284). */
   commentSnapshots: CommentSnapshots;
@@ -154,7 +154,7 @@ function services(c: Context, timing = new ReadTiming()): Services | null {
     firstViewLimit: rateLimiter(env, "FIRST_VIEW_LIMIT"),
     searchLimit: rateLimiter(env, "SEARCH_LIMIT"),
     comments: convexCommentGrants,
-    moderation: { roles: serviceRepoModeration(access as Fetcher), epochs: kvRevocationEpochs(epochs as KvReader) },
+    moderation: { roles: serviceRepoModeration(access as Fetcher) },
     commentSnapshots: convexCommentSnapshots,
     // The search index is optional: without a D1 binding the search URL is the plain 404.
     search: hasMethods(search, ["prepare", "batch", "exec"]) ? d1SearchIndex(search as SearchD1) : null,
@@ -219,9 +219,10 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
   // The shell holds the one comments connection (#254); frames only talk to it. Without a Convex URL the shell loads no client.
   // It names the document the shell opens with, so its first access request can bring that page's first comments (#284).
-  const repoCommentConfig = {
+  // Comments exist on private repositories only (#353): a public shell carries no comment configuration at all.
+  const repoCommentConfig = grant.repo.private ? {
     repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL, documentPath: selected,
-  };
+  } : undefined;
   // Private frames load their images through tickets, which only the trusted shell may renew.
   const html = renderScopedDocumentShell({
     namespace: request.name, title: `${request.owner}/${request.name}`,
@@ -293,8 +294,8 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
       const html = legacy ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html;
       return { title: rendered.title, parts: grant.repo.private ? await ticketImageSlots(html, path) : [html] };
     });
-  // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
-  const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);
+  // A private frame carries the widget; the shell decides what it may do. A public frame carries none (#353).
+  const widget = file.render === undefined || !grant.repo.private ? "" : commentorScript(origin, grant.repo.id, path, file);
   let head = viewerScript("navigation", { prefix: `${base}/files/`, documentPath: path }, c.req.url);
   let prefix = "";
   if (grant.repo.private) {
@@ -311,7 +312,7 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
     request: c.req.raw,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": frameContentSecurityPolicy(origin),
+      "Content-Security-Policy": frameContentSecurityPolicy(origin, grant.repo.private),
       "Cache-Control": cachePolicy(grant, request.ref),
     },
     // A public frame is fixed by its URL and render key; a private one embeds a per-reader ticket and has no validator.
@@ -355,19 +356,8 @@ async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, m
 const MAX_SNAPSHOT_PATH_LENGTH = 1_024;
 
 /**
- * The signed-in reader a request's comment access is for (#259, #303). A private grant is its reader's own. For a public
- * repository it is whoever the session names: the reader the first comment page is read for (so it says which threads
- * are theirs to archive or delete), and the one whose moderation role is asked. A reader the session cannot name now
- * (anonymous, or the session check unavailable) is anonymous, as before; a check that fails outright rejects.
- */
-async function commentReader(request: Request, grant: RepoGrant, services: Services): Promise<string | null> {
-  if (grant.repo.private) return grant.viewer;
-  const viewer = await services.authorize.identity(request);
-  return viewer.kind === "user" ? viewer.id : null;
-}
-
-/**
- * Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. The shell's
+ * Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. Comments exist on
+ * private repositories only (#353): for a public one this is the read path's plain 404, with no Convex call. The shell's
  * first request names the document it shows (`?path=`), and the answer then carries that document's first thread
  * page too (#284), read for this reader in parallel with the grant and returned only when the grant was recorded,
  * so the drawer and highlights need not wait for the Convex socket. A page that could not be read is left out: the
@@ -380,21 +370,22 @@ async function commentReader(request: Request, grant: RepoGrant, services: Servi
  */
 async function commentAccessResponse(c: Context, grant: RepoGrant, services: Services): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
+  const viewer = commentReader(grant);
+  if (viewer === null) return notFound(c, "json");
   const path = c.req.query("path");
   const wanted = path !== undefined && path.length <= MAX_SNAPSHOT_PATH_LENGTH && isCanonicalStorageKey(path) ? path : null;
   const now = services.authorize.now();
-  const reader = commentReader(c.req.raw, grant, services);
-  const decision = reader.then(viewer => moderatorDecision(services.moderation, grant, viewer, now)).catch(() => null);
+  const decision = moderatorDecision(services.moderation, grant, viewer, now).catch(() => null);
   const [access, decided, threads] = await Promise.all([
-    commentAccess(services.comments, grant, now),
+    commentAccess(services.comments, grant, viewer, now),
     decision,
-    wanted === null ? null : Promise.all([reader, decision])
-      .then(([viewer, moderator]) => commentSnapshot(services.commentSnapshots, grant, wanted, viewer, moderator !== null)).catch(() => null),
+    wanted === null ? null : decision
+      .then(moderator => commentSnapshot(services.commentSnapshots, grant, wanted, viewer, moderator !== null)).catch(() => null),
   ]);
   if (!access) return notFound(c, "json");
   if (decided) await recordModerator(services.comments, grant, decided, now).catch(() => null);
   return c.json({
-    repoId: grant.repo.id, private: grant.repo.private, expiresAt: access.expiresAt,
+    repoId: grant.repo.id, expiresAt: access.expiresAt,
     ...(threads ? { threads: { path: wanted, page: threads.page, isDone: threads.isDone } } : {}),
   });
 }

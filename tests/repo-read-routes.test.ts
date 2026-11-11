@@ -9,7 +9,6 @@ import { ingestBranch } from "@/ingest/orchestrator/ingest";
 import { PREPARE_WINDOW_MS } from "@/repo-read/first-view";
 import { READINESS_HEADER } from "@/repo-read/preparing";
 import { imageProxyPath } from "@/image-proxy";
-import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import {
   FakeIngestCoordinator, FakeRateLimiter, freshRepo, MemoryEdgeCache, privateRepo, publicRepo, repoFiles, repoReadFixture,
   sessionCookies, stubSessions, users,
@@ -142,8 +141,8 @@ describe("public repositories", () => {
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(response.headers.get("Content-Security-Policy")).toBe(
-      "sandbox allow-scripts allow-popups; default-src 'none'; script-src https://rendro.test/private-viewer.js https://rendro.test/commentor.js; "
-      + `style-src https://rendro.test/styles/ ${COMMENTOR_STYLE_HASH}; `
+      "sandbox allow-scripts allow-popups; default-src 'none'; script-src https://rendro.test/private-viewer.js; "
+      + "style-src https://rendro.test/styles/; "
       + "img-src https://rendro.test; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
     expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
     expect(response.headers.get("Cross-Origin-Opener-Policy")).toBeNull();
@@ -156,11 +155,8 @@ describe("public repositories", () => {
     expect(html).toContain('<img src="img/logo.png" alt="Logo"');
     expect(html).toContain('class="markdown-alert markdown-alert-note"');
     expect(html).toContain('data-viewer="navigation"');
-    // The comment widget, configured the same for every reader: repository, page and blob only (#254).
-    const widget = /<script defer src="https:\/\/rendro\.test\/commentor\.js\?v=\d+" data-commentor-config="([^"]+)"><\/script>/.exec(html);
-    expect(JSON.parse((widget?.[1] ?? "").replaceAll("&quot;", '"'))).toEqual({
-      transport: "parent", repoId: publicRepo.id, documentPath: "docs/index.md", blobSha: expect.stringMatching(/^[0-9a-f]{40}$/),
-    });
+    // Comments exist on private repositories only (#353): a public frame carries no widget, no configuration, no policy for one.
+    expect(html).not.toContain("commentor");
     expect(html).not.toContain("<base");
     expect(html).not.toContain('data-viewer="frame"');
 

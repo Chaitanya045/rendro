@@ -4,21 +4,19 @@ import {
   clearCommentGrantMemory, commentSnapshot, convexCommentGrants, moderatorDecision, recordModerator, type CommentGrants, type CommentSnapshots, type ModerationSources,
 } from "../src/repo-read/comments";
 import { issueGrant } from "../src/repo-read/grant";
-import { privateRepo, publicRepo } from "./helpers/repo-read-fixture";
+import { privateRepo } from "./helpers/repo-read-fixture";
 
 /** The serving Worker's half of moderator grants (#259): who it asks, under which epoch, and what it remembers. */
 
-function sources(role: "admin" | "maintain" | null | Error, epochs: Record<string, number> = {}) {
+function sources(role: "admin" | "maintain" | null | Error) {
   const asked: Array<{ viewer: string; repo: string }> = [];
-  const epochReads: string[] = [];
   const value: ModerationSources = {
     roles: { moderationRole: (viewer, owner, name) => {
       asked.push({ viewer, repo: `${owner}/${name}` });
       return role instanceof Error ? Promise.reject(role) : Promise.resolve(role);
     } },
-    epochs: { currentEpoch: (userId) => { epochReads.push(userId); return Promise.resolve(epochs[userId] ?? 0); } },
   };
-  return { value, asked, epochReads };
+  return { value, asked };
 }
 
 function recorder(answer: number | null | Error = 61_000) {
@@ -36,20 +34,16 @@ function recorder(answer: number | null | Error = 61_000) {
 beforeEach(() => clearCommentGrantMemory());
 
 describe("moderatorDecision", () => {
-  it("is nothing for no reader, and for an authorization that has already lapsed", async () => {
+  it("is nothing for an authorization that has already lapsed", async () => {
     const { value, asked } = sources("admin");
-    expect(await moderatorDecision(value, issueGrant(privateRepo, "u", 3, 61_000), null, 1_000)).toBeNull();
     expect(await moderatorDecision(value, issueGrant(privateRepo, "u", 3, 1_000), "u", 1_000)).toBeNull();
     expect(asked).toEqual([]);
   });
 
-  it("decides a private grant under the epoch its authorization rested on, and a public one under the reader's own, read first", async () => {
-    const world = sources("maintain", { v: 77 });
+  it("decides a grant under the epoch its authorization rested on", async () => {
+    const world = sources("maintain");
     expect(await moderatorDecision(world.value, issueGrant(privateRepo, "u", 3, 61_000), "u", 1_000)).toEqual({ viewer: "u", role: "maintain", epoch: 3, recorded: false });
-    expect(world.epochReads).toEqual([]);
-    expect(await moderatorDecision(world.value, issueGrant(publicRepo, null, 0, 61_000), "v", 1_000)).toEqual({ viewer: "v", role: "maintain", epoch: 77, recorded: false });
-    expect(world.epochReads).toEqual(["v"]);
-    expect(world.asked).toEqual([{ viewer: "u", repo: "octo/secret-docs" }, { viewer: "v", repo: "Octo/public-docs" }]);
+    expect(world.asked).toEqual([{ viewer: "u", repo: "octo/secret-docs" }]);
   });
 
   it("remembers 'no role' for half the grant, per reader and epoch, and asks again after", async () => {
@@ -133,18 +127,16 @@ describe("Convex's answer and the first page", () => {
     expect(await convexCommentGrants.recordModerator(input)).toBeNull();
   });
 
-  it("tells Convex the page's reader moderates only when there is a reader to name", async () => {
+  it("tells Convex the page's reader moderates only when the control Worker said so", async () => {
     const asked: unknown[] = [];
     const snapshots: CommentSnapshots = { threads: (input) => { asked.push(input); return Promise.resolve({ page: [], isDone: true }); } };
-    await commentSnapshot(snapshots, issueGrant(privateRepo, "u", 3, 61_000), "a.md", null, true);
-    await commentSnapshot(snapshots, issueGrant(privateRepo, "u", 3, 61_000), "a.md", null, false);
-    await commentSnapshot(snapshots, issueGrant(publicRepo, null, 0, 61_000), "a.md", "v", true);
-    await commentSnapshot(snapshots, issueGrant(publicRepo, null, 0, 61_000), "a.md", null, true);
+    await commentSnapshot(snapshots, issueGrant(privateRepo, "u", 3, 61_000), "a.md", "u", true);
+    await commentSnapshot(snapshots, issueGrant(privateRepo, "u", 3, 61_000), "a.md", "u", false);
+    await commentSnapshot(snapshots, issueGrant(privateRepo, "u", 3, 61_000), "a.md", "u");
     expect(asked).toEqual([
       { repoId: privateRepo.id, path: "a.md", userId: "u", epoch: 3, moderator: true },
       { repoId: privateRepo.id, path: "a.md", userId: "u", epoch: 3 },
-      { repoId: publicRepo.id, path: "a.md", userId: null, epoch: 0, viewerId: "v", moderator: true },
-      { repoId: publicRepo.id, path: "a.md", userId: null, epoch: 0 },
+      { repoId: privateRepo.id, path: "a.md", userId: "u", epoch: 3 },
     ]);
   });
 });

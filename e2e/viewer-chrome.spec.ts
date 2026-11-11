@@ -1,6 +1,6 @@
 import type { Locator, Page, Route } from "@playwright/test";
 import { test, expect, content, documentFrame, doc } from "./viewer-fixtures";
-import { clipboard, desktop, fakeClipboard, mobile } from "./shell-helpers";
+import { clipboard, desktop, fakeClipboard, mobile, signInSeeded } from "./shell-helpers";
 
 /**
  * The repository viewer's own chrome around the opaque document (/r/, the public `viewer-docs` fixture): theme, reading
@@ -46,8 +46,10 @@ test.afterEach(({ cspViolations }) => {
 test.describe("desktop chrome", () => {
   test.use({ viewport: desktop });
 
-  test("the theme control cycles system, dark and light, persists, and tells the document", async ({ page: tab, site }) => {
+  // The document's comment widget follows the theme, and comments exist on private repositories only (#353): this one reads the private copy.
+  test("the theme control cycles system, dark and light, persists, and tells the document", async ({ page: tab, privateSite: site, context, baseURL, seed }) => {
     test.slow();
+    await signInSeeded(context, baseURL, seed, "owner");
     await tab.emulateMedia({ colorScheme: "light" });
     await open(tab, site.docs);
     await expect(tab.locator("#theme-toggle .rendro-theme-control, .topbar .rendro-theme-control")).toHaveCount(1);

@@ -5,8 +5,8 @@ import { storedDrafts } from "./comment-helpers";
 
 /**
  * The comment widget and the document's links share one opaque frame and one shell: a link inside the document, and the
- * shell's own confirmation for a link to another site, must not cost the reader the comment they are writing. Writing
- * needs a signed-in reader; anyone may comment on a public repository.
+ * shell's own confirmation for a link to another site, must not cost the reader the comment they are writing. Comments
+ * exist on private repositories only (#353), so these pages are read as a collaborator of one.
  */
 test.use({ viewport: desktop });
 test.beforeEach(async ({ context, baseURL, seed }) => { await signInSeeded(context, baseURL, seed, "owner"); });
@@ -31,7 +31,7 @@ async function startComment(tab: Page) {
 }
 
 test.describe("comments and links", () => {
-  test("a link within the document scrolls it without reloading it or losing the comment being written", async ({ page: tab, site }) => {
+  test("a link within the document scrolls it without reloading it or losing the comment being written", async ({ page: tab, privateSite: site }) => {
     await tab.goto(`${site.docs}?doc=${encodeURIComponent(doc("comment.md"))}`);
     await expect(heading(tab, "Comment page")).toBeVisible();
     await startComment(tab);
@@ -60,7 +60,7 @@ test.describe("comments and links", () => {
     expect(await documentFrame(tab).evaluate(() => performance.timeOrigin)).toBe(loadedAt);
   });
 
-  test("a link confirmation that is waiting, or dismissed, leaves the theme, the tree and the comment actions working", async ({ page: tab, site, context }) => {
+  test("a link confirmation that is waiting, or dismissed, leaves the theme, the tree and the comment actions working", async ({ page: tab, privateSite: site, context }) => {
     test.slow();
     await context.route("https://docs.example.test/**", route => route.fulfill({ contentType: "text/html", body: "<h1>outside</h1>" }));
     await tab.goto(`${site.docs}?doc=${encodeURIComponent(doc("comment.md"))}`);

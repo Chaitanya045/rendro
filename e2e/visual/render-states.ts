@@ -78,14 +78,14 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         if (state === "default") {
           await expect(page.getByRole("heading", { name: "Welcome, Crown Turner", level: 1 })).toBeVisible();
           await expect(repositories.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
-        } else if (state === "repositories") await expect(repositories.getByRole("listitem")).toHaveCount(2);
+        } else if (state === "repositories") await expect(repositories.getByRole("listitem")).toHaveCount(5);
         else if (state === "empty") await expect(repositories).toContainText("No repositories yet.");
         else if (state === "error") await expect(repositories.getByRole("alert")).toBeVisible();
         else throw new Error(`Unknown visual state home/${state}`);
         return rendered();
       }
       case "viewer": {
-        await page.context().addCookies(visual.crown.cookies);
+        await signInSeeded(page.context(), origin(), visual.seedOwner, "owner");
         if (state === "loading") {
           // An in-shell load held at the browser boundary (the initial document cannot be held:
           // the page's load event would wait for the opaque frame). The held page request leaves
@@ -112,7 +112,7 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         return rendered();
       }
       case "comments": {
-        await page.context().addCookies(visual.crown.cookies);
+        await signInSeeded(page.context(), origin(), visual.seedOwner, "owner");
         if (state !== "drawer") return await openThreadState(page, visual, state, closers, rendered);
         await page.goto(`${visual.docs}?doc=${encodeURIComponent("docs/reference/errors.md")}`);
         await viewerReady(page, "Errors", 2);
@@ -224,7 +224,7 @@ async function openVisualHome(page: Page, base: string) {
   await expect(page.locator(".tree-item.active .tree-label")).toHaveText("Visual home");
 }
 
-/** The visual-docs repository (public, fixed Markdown), only provisioned in the visual runs. */
+/** The visual-docs repository (private so that it may carry comments, fixed Markdown), only provisioned in the visual runs. */
 function visualRepo(visual: VisualState) {
   const repo = visual.repos().visual;
   if (!repo) throw new Error("The visual repository is missing: run through e2e/visual.config.ts");
@@ -237,6 +237,8 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
   const docs = visualRepo(visual);
   const base = `/r/${docs.owner}/${docs.name}`;
   const frameHeading = (name: string) => repoContent(page).getByRole("heading", { level: 1, name });
+  // The visual repository is private (its comments need that, #353): its readers are the seeded owner.
+  if (!["not-found", "denied", "unavailable", "private"].includes(state)) await signInSeeded(page.context(), origin(), visual.seedOwner, "owner");
   switch (state) {
     case "not-found": {
       await page.goto(`/r/${repositories.closed.owner}/${repositories.closed.name}`);

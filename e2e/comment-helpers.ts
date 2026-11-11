@@ -35,7 +35,7 @@ export const storedDrafts = (page: Page) => page.evaluate(() => Object.entries(s
 
 export const repos = (): RepoFixtures => JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
 /** GitHub's IDs of the comment fixtures (`repositoryWorld`): Convex scopes comments by them. */
-export const repoIds = { comments: 9004, commentsPrivate: 9005 } as const;
+export const repoIds = { comments: 9004, commentsPrivate: 9005, commentsPublic: 9008 } as const;
 export const ui = (page: Page): FrameLocator => page.frameLocator("#content-frame");
 export const unique = (label: string) => `${label} ${randomBytes(4).toString("hex")}`;
 
@@ -47,8 +47,15 @@ async function control<T>(path: string, body?: unknown): Promise<T> {
 
 /** Push a commit to comment-docs (null deletes a file); it is ingested before this returns. */
 export const commit = async (changes: Record<string, string | null>) => (await control<{ commit: string }>("/commit/comments", { changes })).commit;
-/** The member's GitHub role on comment-docs (#259), applied through GitHub's `member` webhook; `none` removes it. */
+/** The member's GitHub role on comment-docs (#259), applied through GitHub's `member` webhook; `none` takes the role away (the member still reads). */
 export const memberRole = async (role: "admin" | "maintain" | "write" | "triage" | "read" | "none") => (await control<{ status: number }>(`/role/${role}`)).status;
+/** Make the signed-in account of `page` a GitHub reader of comment-docs (or the private viewer pages), whose comments are for its readers only (#353). */
+export async function becomeReader(page: Page, repo: "comments" | "viewerPrivate" = "comments") {
+  const session = await page.request.get("/api/auth/get-session");
+  expect(session.ok()).toBe(true);
+  const { user } = await session.json() as { user: { id: string } };
+  expect((await control<{ status: number }>("/reader", { userId: user.id, repo })).status).toBe(204);
+}
 export const collaborator = async (action: "added" | "removed") => (await control<{ status: number }>(`/collaborator/${action}`)).status;
 
 /** A page of comment-docs of its own (a new path per call), so a journey starts with no comments even on a retry. */
@@ -123,8 +130,8 @@ export async function threadsAs(token: string | undefined, scope: Scope): Promis
   return (result.value as { page: Listed[] }).page;
 }
 
-/** What anyone may read of a public repository's page, straight from Convex (no session). */
-export const publicThreads = (path: string) => threadsAs(undefined, { repoId: repoIds.comments, path });
+/** What `token`'s person reads of comment-docs' page, straight from Convex. */
+export const commentThreads = (token: string | undefined, path: string) => threadsAs(token, { repoId: repoIds.comments, path });
 
 /** An anchor on `exact` in the page's Notes section. The offset is left for the reader to find by quote (#254). */
 export async function anchorOn(page: Page, exact: string, headingSlug = "notes") {
