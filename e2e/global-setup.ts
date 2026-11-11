@@ -88,7 +88,7 @@ export default async function globalSetup(config?: FullConfig) {
     const controlVars = { GITHUB_API_ORIGIN: world.github.origin, GITHUB_WEB_ORIGIN: world.github.webOrigin, GITHUB_APP_CLIENT_ID: world.github.clientId, GITHUB_APP_ID: world.github.appId, CONVEX_URL: convex.origin };
     const controlSecrets = {
       GITHUB_WEBHOOK_SECRET: randomBytes(32).toString("hex"), GITHUB_TOKEN_KEY: randomBytes(32).toString("hex"),
-      GITHUB_APP_CLIENT_SECRET: world.github.clientSecret, GITHUB_APP_PRIVATE_KEY: world.github.appPrivateKey, CONVEX_INTERNAL_SECRET: vars.CONVEX_INTERNAL_SECRET,
+      GITHUB_APP_CLIENT_SECRET: world.github.clientSecret, GITHUB_APP_PRIVATE_KEY: world.github.appPrivateKey, GITHUB_PUBLIC_READ_TOKEN: world.github.publicReadToken, CONVEX_INTERNAL_SECRET: vars.CONVEX_INTERNAL_SECRET,
     };
     // The empty file also prevents loading shell credentials through required secrets.
     await writeFile(join(directory, ".dev.vars"), "# Only explicit synthetic bindings are used.\n");

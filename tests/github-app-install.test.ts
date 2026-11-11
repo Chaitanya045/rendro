@@ -186,6 +186,23 @@ describe("the ingest Worker's GitHub credentials (#338)", () => {
     expect(webhookDeliveries({} as never)).toBe(unconfiguredDeliveries);
   });
 
+  it("reads a repository the App is not installed on with the public-read token, and never uses it for an installation (#354)", async () => {
+    const github = new FakeGitHub();
+    const app = { GITHUB_APP_ID: github.appId, GITHUB_APP_PRIVATE_KEY: github.appPrivateKey, GITHUB_API_ORIGIN: github.origin, GITHUB_PUBLIC_READ_TOKEN: "public-token" };
+    globalThis.fetch = github.fetch;
+    github.install("octo", { id: 71 });
+    const tokens = ingestTokens(app as never);
+    expect(ingestTokens(app as never)).toBe(tokens);
+    expect(await tokens.token(null)).toBe("public-token");
+    expect(await tokens.token(71)).not.toBe("public-token");
+    expect(typeof tokens.installationOf).toBe("function");
+    // Without the App (development), the static token wins and the public one is the fallback after it.
+    expect(await ingestTokens({ GITHUB_PUBLIC_READ_TOKEN: "public-token" } as never).token(null)).toBe("public-token");
+    expect(await ingestTokens({ GITHUB_DEV_TOKEN: "dev", GITHUB_PUBLIC_READ_TOKEN: "public-token" } as never).token(null)).toBe("dev");
+    // An installation without a token stays without one.
+    expect(await ingestTokens({ GITHUB_PUBLIC_READ_TOKEN: "public-token" } as never).token(5)).toBeNull();
+  });
+
   it("reads the App's webhook deliveries with its JWT", async () => {
     const github = new FakeGitHub();
     globalThis.fetch = github.fetch;

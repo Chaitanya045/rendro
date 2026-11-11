@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import {
-  repoAccessHandler, repoKey, RepoAccessUnavailable, repoModerationHandler, type ModerationRole, type RepoModerationSource, type RepoPermissionSource, type RepoRecord, type RepoVisibilityEpochs, type RevocationEpochs,
+  repoAccessHandler, repoKey, RepoAccessLimited, RepoAccessUnavailable, repoModerationHandler, type ModerationRole, type RepoModerationSource, type RepoPermissionSource, type RepoRecord, type RepoVisibilityEpochs, type RevocationEpochs,
 } from "../../src/repo-read/access";
 import { clearAuthorizationMemory } from "../../src/repo-read/authorize";
 import { clearSnapshotMemory, type EdgeCache } from "../../src/repo-read/snapshot";
@@ -23,6 +23,8 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationS
   readonly moderators = new Map<string, ModerationRole>();
   readonly calls = { authorize: [] as Array<{ viewer: string; repo: string }>, moderation: [] as Array<{ viewer: string; repo: string }>, epochs: 0 };
   unavailable = false;
+  /** When set, `authorize` is limited (#354) and asks the reader to retry after this many seconds. */
+  limitedFor: number | null = null;
   /** Only the role lookup fails (#259); reading is untouched. */
   moderationUnavailable = false;
   epochsUnavailable = false;
@@ -57,6 +59,7 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RepoModerationS
   authorize(viewer: string, owner: string, name: string): Promise<RepoRecord | null> {
     this.calls.authorize.push({ viewer, repo: repoKey(owner, name) });
     if (this.unavailable) return Promise.reject(new RepoAccessUnavailable());
+    if (this.limitedFor !== null) return Promise.reject(new RepoAccessLimited(this.limitedFor));
     const repo = this.repos.get(repoKey(owner, name));
     if (!repo) return Promise.resolve(null);
     return Promise.resolve(!repo.private || this.readers.get(repo.id)?.has(viewer) ? repo : null);

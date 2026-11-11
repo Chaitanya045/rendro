@@ -30,6 +30,17 @@ export class RepoAccessUnavailable extends Error {
   }
 }
 
+/**
+ * The reader is asking about too many repositories nobody has read yet (#354): their own allowance or the global one
+ * is spent. Retryable, once `retryAfterSeconds` have passed; never a denial.
+ */
+export class RepoAccessLimited extends Error {
+  constructor(readonly retryAfterSeconds: number) {
+    super("Repository access temporarily limited");
+    this.name = "RepoAccessLimited";
+  }
+}
+
 export interface RepoPermissionSource {
   /**
    * The repository `owner/name` (case-insensitive) when `viewer` may read it
@@ -107,7 +118,7 @@ const ACCESS_TIMEOUT_MS = 5_000;
 
 /**
  * Client for the control Worker. POST `/v1/authorize` with
- * `{ viewer, owner, name }`; 200 `{ repo }` grants, 404 denies, anything else
+ * `{ viewer, owner, name }`; 200 `{ repo }` grants, 404 denies, 429 `{ retryAfter }` limits (#354), anything else
  * (including a malformed or mismatched answer, or no answer within five
  * seconds) is unavailable.
  */
@@ -116,6 +127,7 @@ export function serviceRepoPermissions(binding: Fetcher, timeoutMs = ACCESS_TIME
     async authorize(viewer, owner, name) {
       let response: Response;
       let body: unknown;
+      let limit: number | null = null;
       try {
         response = await binding.fetch(new Request(AUTHORIZE_URL, {
           method: "POST",
@@ -127,16 +139,24 @@ export function serviceRepoPermissions(binding: Fetcher, timeoutMs = ACCESS_TIME
           await response.body?.cancel();
           return null;
         }
+        if (response.status === 429) limit = limitedAfter(await response.json().catch(() => null));
         body = response.ok ? await response.json() : null;
       } catch {
         throw new RepoAccessUnavailable();
       }
+      if (limit !== null) throw new RepoAccessLimited(limit);
       const repo = parseRepoRecord((body as { repo?: unknown } | null)?.repo);
       // A source must answer for the repository asked about, never another one.
       if (!repo || repoKey(repo.owner, repo.name) !== repoKey(owner, name)) throw new RepoAccessUnavailable();
       return repo;
     },
   };
+}
+
+/** The retry time a 429 answer names: a whole number of seconds up to an hour, else a minute. */
+function limitedAfter(body: unknown): number {
+  const seconds = (body as { retryAfter?: unknown } | null)?.retryAfter;
+  return Number.isSafeInteger(seconds) && (seconds as number) >= 1 && (seconds as number) <= 3_600 ? seconds as number : 60;
 }
 
 const MODERATION_URL = "https://repo-access.internal/v1/moderation";
@@ -189,8 +209,8 @@ export function repoAccessHandler(source: RepoPermissionSource): (request: Reque
     try {
       const repo = await source.authorize(viewer, input.owner, input.name);
       return repo ? json(200, { repo }) : json(404, {});
-    } catch {
-      return json(503, { error: "Unavailable" });
+    } catch (error) {
+      return error instanceof RepoAccessLimited ? json(429, { error: "Limited", retryAfter: error.retryAfterSeconds }) : json(503, { error: "Unavailable" });
     }
   };
 }

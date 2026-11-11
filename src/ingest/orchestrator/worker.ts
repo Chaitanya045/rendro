@@ -8,6 +8,7 @@
 import { HttpWebhookDeliveries, unconfiguredDeliveries } from "../github/deliveries";
 import { appJwtSigner, gitHubAppCredentials, mintedInstallationTokens, type GitHubAppCredentials, type MintingTokenProvider } from "../github/app-auth";
 import { HttpGitHubSource } from "../github/http-source";
+import { publicReadTokens } from "../github/public-token";
 import { staticTokenProvider, type InstallationTokenProvider } from "../github/token";
 import { IngestCoordinator, IDLE_EXPIRY_MS, type DurableStateLike } from "./coordinator";
 import { coordinatorClient, type DurableObjectNamespaceLike } from "./coordinator-client";
@@ -34,6 +35,8 @@ export interface IngestWorkerEnv {
   GITHUB_APP_PRIVATE_KEY?: string;
   /** Development and tests only: a static installation token where the App is not configured. */
   GITHUB_DEV_TOKEN?: string;
+  /** Rendro's own public-read-only token (#354): reads branch heads and content of public repositories the App is not installed on. */
+  GITHUB_PUBLIC_READ_TOKEN?: string;
   /** Signs image proxy URLs in rendered pages (#224); the serving Worker's IMAGE_PROXY_SECRET. */
   IMAGE_PROXY_SECRET: string;
   /** Repository search index (#251). Development and tests only; P-deploy provisions it. */
@@ -62,13 +65,23 @@ function app(env: IngestWorkerEnv): GitHubAppCredentials | null {
   return gitHubAppCredentials(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY);
 }
 
+/**
+ * Installation tokens, and for a repository the App is not installed on (#354) the public-read token: a public
+ * repository's first view, pushes found by reconciliation and archives are read with it. A private repository
+ * has an installation or is not readable at all, so the token never reaches one.
+ */
+function withPublicRead(inner: InstallationTokenProvider, env: IngestWorkerEnv): InstallationTokenProvider {
+  const publicRead = publicReadTokens(env.GITHUB_PUBLIC_READ_TOKEN);
+  return { ...inner, token: async (installation) => await inner.token(installation) ?? (installation === null ? publicRead.token() : null) };
+}
+
 export function ingestTokens(env: IngestWorkerEnv): InstallationTokenProvider {
   const credentials = app(env);
-  if (!credentials) return staticTokenProvider(env.GITHUB_DEV_TOKEN || null);
-  const key = JSON.stringify([credentials.appId, credentials.privateKey, env.GITHUB_API_ORIGIN ?? ""]);
+  if (!credentials) return withPublicRead(staticTokenProvider(env.GITHUB_DEV_TOKEN || null), env);
+  const key = JSON.stringify([credentials.appId, credentials.privateKey, env.GITHUB_API_ORIGIN ?? "", env.GITHUB_PUBLIC_READ_TOKEN ?? ""]);
   let provider = minted.get(key);
   if (!provider) {
-    provider = mintedInstallationTokens({ app: appJwtSigner(credentials), apiOrigin: env.GITHUB_API_ORIGIN || undefined });
+    provider = withPublicRead(mintedInstallationTokens({ app: appJwtSigner(credentials), apiOrigin: env.GITHUB_API_ORIGIN || undefined }), env) as MintingTokenProvider;
     minted.set(key, provider);
   }
   return provider;
